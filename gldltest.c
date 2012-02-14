@@ -37,19 +37,13 @@ int main() {
                                                                            modes[i].GreenBits +
                                                                            modes[i].BlueBits));
         
-        // init gl3w
+        // init gldl
         noerr = !gldlInit();
         if( !noerr ) {
             printf( "Error initializing gldl!\n" );
             return -1;
         } else
             printf( "GLDL initialized!\n" );
-            /*
-        if( !gl3wIsSupported( 3, 3 ) ) {
-            printf( "Error : GL 3.3 not supported!" );
-            return -1;
-        }
-        */
 
         int run = 1;
 
