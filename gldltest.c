@@ -42,8 +42,11 @@ int main() {
         if( !noerr ) {
             printf( "Error initializing gldl!\n" );
             return -1;
-        } else
+        } else {
             printf( "GLDL initialized!\n" );
+            noerr = gldlIsSupported( 3, 3 );
+            printf( "GL version 3.3 %ssupported\n.", noerr ? "" : "un" );
+        }
 
         int run = 1;
 

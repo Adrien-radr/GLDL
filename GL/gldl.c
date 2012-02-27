@@ -70,6 +70,12 @@ int gldlInit() {
     return GetGLVersion();
 }
 
+int gldlIsSupported( unsigned int pMajor, unsigned int pMinor ) {
+    if( pMajor < 3 ) return 0;
+    if( pMajor > gl_version.mMajor ) return 1;
+
+    return ( pMajor == gl_version.mMajor && pMinor >= gl_version.mMinor );
+}
 
 
 

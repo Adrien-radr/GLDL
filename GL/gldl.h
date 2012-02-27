@@ -17,6 +17,7 @@ extern "C" {
 
 // GLDL API functions
 int gldlInit();
+int gldlIsSupported( unsigned int pMajor, unsigned int pMinor );
 void gldlDebugFunc( int pFuncNumber );
 
 extern PFNGLCLEARPROC gldlClear;
