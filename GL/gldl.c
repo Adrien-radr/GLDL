@@ -1,4 +1,7 @@
 #include <stdio.h>
+#include <string.h>
+
+
 #include "gldl.h"
 
 // WINDOWS
@@ -46,18 +49,20 @@
 static void LoadProcs();
 
 
+// ###################################################################
+// API FUNCTIONS
 static struct {
-    GLint mMajor,
-          mMinor;
+    GLint major,
+          minor;
 } gl_version;
 
 static int GetGLVersion() {
     if( !glGetIntegerv ) return -1;
 
-    glGetIntegerv( GL_MAJOR_VERSION, &gl_version.mMajor );
-    glGetIntegerv( GL_MINOR_VERSION, &gl_version.mMinor );
+    glGetIntegerv( GL_MAJOR_VERSION, &gl_version.major );
+    glGetIntegerv( GL_MINOR_VERSION, &gl_version.minor );
 
-    if( gl_version.mMajor < 3 ) return -1;
+    if( gl_version.major < 3 ) return -1;
 
     return 0;
 }
@@ -70,24 +75,54 @@ int gldlInit() {
     return GetGLVersion();
 }
 
-int gldlIsSupported( unsigned int pMajor, unsigned int pMinor ) {
-    if( pMajor < 3 ) return 0;
-    if( pMajor > gl_version.mMajor ) return 1;
+int gldlIsSupported( unsigned int major, unsigned int minor ) {
+    if( major < 3 ) return 0;
+    if( major > gl_version.major ) return 1;
 
-    return ( pMajor == gl_version.mMajor && pMinor >= gl_version.mMinor );
+    return ( major == gl_version.major && minor >= gl_version.minor );
+}
+
+
+// ###################################################################
+// INTERNAL
+static char var_str[512];
+static char **gl_constants;
+
+void tostr_AttribMask( GLbitfield mask ) {
+    var_str[0] = 0;
+    int bit_n = 0;
+
+    if( GL_COLOR_BUFFER_BIT & mask ) {
+        strcat( var_str, "GL_COLOR_BUFFER_BIT" );
+        ++bit_n;
+    }
+    if( GL_DEPTH_BUFFER_BIT & mask ) {
+        if( bit_n ) strcat( var_str, " | GL_DEPTH_BUFFER_BIT" );
+        else        strcat( var_str, "GL_DEPTH_BUFFER_BIT" );
+    }
+    if( GL_STENCIL_BUFFER_BIT & mask ) {
+        if( bit_n ) strcat( var_str, " | GL_STENCIL_BUFFER_BIT" );
+        else        strcat( var_str, "GL_STENCIL_BUFFER_BIT" );
+    }
 }
 
 
 
-
-PFNGLCLEARPROC gldlClear;
+PFNGLCLEARPROC gldlClear_impl;
 PFNGLGETINTEGERVPROC gldlGetIntegerv;
 
 static void LoadProcs() {
-    gldlClear = (PFNGLCLEARPROC) GetProc( "glClear" );
+    gldlClear_impl = (PFNGLCLEARPROC) GetProc( "glClear" );
     gldlGetIntegerv = (PFNGLGETINTEGERVPROC) GetProc( "glGetIntegerv" );
 }
 
+void gldlClear( GLbitfield mask, const char* file, int line ) {
+    tostr_AttribMask( mask );
+
+    printf( "call<%s,%d>: glClear( %s )\n", file, line, var_str );
+
+    gldlClear_impl( mask );
+}
 /*
 void gldlClear( GLbitfield mask ) {
     char c = 0;

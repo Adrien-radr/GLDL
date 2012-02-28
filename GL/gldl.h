@@ -17,14 +17,17 @@ extern "C" {
 
 // GLDL API functions
 int gldlInit();
-int gldlIsSupported( unsigned int pMajor, unsigned int pMinor );
-void gldlDebugFunc( int pFuncNumber );
+int gldlIsSupported( unsigned int major, unsigned int minor );
 
-extern PFNGLCLEARPROC gldlClear;
+void gldlDebugFunc( int funcNumber );
+
+//extern PFNGLCLEARPROC gldlClear;
+void gldlClear( GLbitfield, const char*, int );
+
 extern PFNGLGETINTEGERVPROC gldlGetIntegerv;
 
 
-#define glClear		    gldlClear
+#define glClear( bf )   gldlClear( (bf), __FILE__, __LINE__ )
 #define glGetIntegerv   gldlGetIntegerv
 
 
