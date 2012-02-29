@@ -51,14 +51,14 @@ static void LoadProcs();
 
 // ###################################################################
 // API FUNCTIONS
+FILE *trace = NULL;
+
 static struct {
     GLint major,
           minor;
 } gl_version;
 
 static int GetGLVersion() {
-    if( !glGetIntegerv ) return -1;
-
     glGetIntegerv( GL_MAJOR_VERSION, &gl_version.major );
     glGetIntegerv( GL_MINOR_VERSION, &gl_version.minor );
 
@@ -71,6 +71,8 @@ int gldlInit() {
     OpenLib();
     LoadProcs();
     CloseLib();
+
+    trace = fopen( "trace.log", "w" );
 
     return GetGLVersion();
 }
@@ -85,41 +87,28 @@ int gldlIsSupported( unsigned int major, unsigned int minor ) {
 
 // ###################################################################
 // INTERNAL
-static char var_str[512];
-static char **gl_constants;
 
-void tostr_AttribMask( GLbitfield mask ) {
-    var_str[0] = 0;
-    int bit_n = 0;
-
-    if( GL_COLOR_BUFFER_BIT & mask ) {
-        strcat( var_str, "GL_COLOR_BUFFER_BIT" );
-        ++bit_n;
-    }
-    if( GL_DEPTH_BUFFER_BIT & mask ) {
-        if( bit_n ) strcat( var_str, " | GL_DEPTH_BUFFER_BIT" );
-        else        strcat( var_str, "GL_DEPTH_BUFFER_BIT" );
-    }
-    if( GL_STENCIL_BUFFER_BIT & mask ) {
-        if( bit_n ) strcat( var_str, " | GL_STENCIL_BUFFER_BIT" );
-        else        strcat( var_str, "GL_STENCIL_BUFFER_BIT" );
-    }
+void gldlDebugFunc( ) {
+    char c = 0;
+    
 }
-
 
 
 PFNGLCLEARPROC gldlClear_impl;
-PFNGLGETINTEGERVPROC gldlGetIntegerv;
+PFNGLGETINTEGERVPROC gldlGetIntegerv_impl;
 
 static void LoadProcs() {
     gldlClear_impl = (PFNGLCLEARPROC) GetProc( "glClear" );
-    gldlGetIntegerv = (PFNGLGETINTEGERVPROC) GetProc( "glGetIntegerv" );
+    gldlGetIntegerv_impl = (PFNGLGETINTEGERVPROC) GetProc( "glGetIntegerv" );
 }
 
-void gldlClear( GLbitfield mask, const char* file, int line ) {
-    tostr_AttribMask( mask );
+void gldlClear( GLbitfield mask, const char * mask_str, const char* file, int line ) {
 
-    printf( "call<%s,%d>: glClear( %s )\n", file, line, var_str );
+    fprintf( trace, "call<%s,%d>: glClear( %s );\n", file, line, mask_str );
+    fflush( trace );
+    printf( "call<%s,%d>: glClear( %s )\n", file, line, mask_str );
+
+    gldlDebugFunc();
 
     gldlClear_impl( mask );
 }
