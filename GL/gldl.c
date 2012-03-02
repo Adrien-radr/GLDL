@@ -4,90 +4,10 @@
 
 #include "gldl.h"
 
-// WINDOWS
-#if defined(_WIN32) || defined(WIN32)
-#   define WIN32_LEAN_AND_MEAN
-#   include <windows.h>
+//////////////////////////////////////////
+// Jump to line 575 for GLDL API functions
+//////////////////////////////////////////
 
-#warning GLDL_WIN32
-// MAC
-#elif defined(__APPLE__) || defined(__APPLE_CC__)
-
-// UNIX
-#else
-#include <dlfcn.h>
-#include <GL/glx.h>
-
-#warning GLDL_UNIX
-    // OpenGL shared library handle
-    static void *libgl;
-
-    /// Load dynamic library libGL.so and store its handle
-    static void OpenLib() {
-        libgl = dlopen( "libGL.so.1", RTLD_GLOBAL | RTLD_LAZY );
-    }
-
-    /// Close the libGL handle
-    static void CloseLib() {
-        dlclose( libgl );
-    }
-
-    /// Returns the GL Procedure corresponding to the given procedure name
-    static void *GetProc( const char *pProcName ) {
-        void *proc = NULL;
-
-        proc = glXGetProcAddress( (const GLubyte*)pProcName );
-        if( !proc )
-            proc = dlsym( libgl, pProcName );
-
-        return proc;
-    }
-#endif
-
-// ###################################################################
-// API FUNCTIONS
-FILE *trace = NULL;
-
-static struct {
-    GLint major,
-          minor;
-} gl_version;
-
-static int GetGLVersion() {
-    glGetIntegerv( GL_MAJOR_VERSION, &gl_version.major );
-    glGetIntegerv( GL_MINOR_VERSION, &gl_version.minor );
-
-    if( gl_version.major < 3 ) return -1;
-
-    return 0;
-}
-
-int gldlIsSupported( unsigned int major, unsigned int minor ) {
-    if( major < 3 ) return 0;
-    if( major > gl_version.major ) return 1;
-
-    return ( major == gl_version.major && minor >= gl_version.minor );
-}
-
-static void LoadProcs();
-
-int gldlInit() {
-    OpenLib();
-    LoadProcs();
-    CloseLib();
-
-    trace = fopen( "trace.log", "w" );
-
-    return GetGLVersion();
-}
-
-// ###################################################################
-// INTERNAL
-
-void gldlDebugFunc( ) {
-    char c = 0;
-    
-}
 
 // GL FUNCTION POINTERS (GL implementation)
 PFNGLCULLFACEPROC gldlCullFace_impl;
@@ -650,6 +570,92 @@ PFNGLTEXSTORAGE3DPROC gldlTexStorage3D_impl;
 PFNGLTEXTURESTORAGE1DEXTPROC gldlTextureStorage1DEXT_impl;
 PFNGLTEXTURESTORAGE2DEXTPROC gldlTextureStorage2DEXT_impl;
 PFNGLTEXTURESTORAGE3DEXTPROC gldlTextureStorage3DEXT_impl;
+
+
+// WINDOWS
+#if defined(_WIN32) || defined(WIN32)
+#   define WIN32_LEAN_AND_MEAN
+#   include <windows.h>
+
+#warning GLDL_WIN32
+// MAC
+#elif defined(__APPLE__) || defined(__APPLE_CC__)
+
+// UNIX
+#else
+#include <dlfcn.h>
+#include <GL/glx.h>
+
+#warning GLDL_UNIX
+    // OpenGL shared library handle
+    static void *libgl;
+
+    /// Load dynamic library libGL.so and store its handle
+    static void OpenLib() {
+        libgl = dlopen( "libGL.so.1", RTLD_GLOBAL | RTLD_LAZY );
+    }
+
+    /// Close the libGL handle
+    static void CloseLib() {
+        dlclose( libgl );
+    }
+
+    /// Returns the GL Procedure corresponding to the given procedure name
+    static void *GetProc( const char *pProcName ) {
+        void *proc = NULL;
+
+        proc = glXGetProcAddress( (const GLubyte*)pProcName );
+        if( !proc )
+            proc = dlsym( libgl, pProcName );
+
+        return proc;
+    }
+#endif
+
+// ###################################################################
+// API FUNCTIONS
+FILE *trace = NULL;
+
+static struct {
+    GLint major,
+          minor;
+} gl_version;
+
+static int GetGLVersion() {
+    gldlGetIntegerv_impl( GL_MAJOR_VERSION, &gl_version.major );
+    gldlGetIntegerv_impl( GL_MINOR_VERSION, &gl_version.minor );
+
+    if( gl_version.major < 3 ) return -1;
+
+    return 0;
+}
+
+int gldlIsSupported( unsigned int major, unsigned int minor ) {
+    if( major < 3 ) return 0;
+    if( major > gl_version.major ) return 1;
+
+    return ( major == gl_version.major && minor >= gl_version.minor );
+}
+
+static void LoadProcs();
+
+int gldlInit() {
+    OpenLib();
+    LoadProcs();
+    CloseLib();
+
+    trace = fopen( "trace.log", "w" );
+
+    return GetGLVersion();
+}
+
+// ###################################################################
+// INTERNAL
+
+void gldlDebugFunc( ) {
+    char c = 0;
+    
+}
 
 // Load all GL procedures implementation
 static void LoadProcs() {
@@ -1263,7 +1269,7 @@ void gldlTexParameterf ( GLenum target, GLenum pname, GLfloat param, const char 
 
 void gldlTexParameterfv ( GLenum target, GLenum pname, const GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlTexParameterfv_impl( target, pname, GLfloat );
+	gldlTexParameterfv_impl( target, pname, params );
 }
 
 void gldlTexParameteri ( GLenum target, GLenum pname, GLint param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -1273,17 +1279,17 @@ void gldlTexParameteri ( GLenum target, GLenum pname, GLint param, const char *a
 
 void gldlTexParameteriv ( GLenum target, GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlTexParameteriv_impl( target, pname, GLint );
+	gldlTexParameteriv_impl( target, pname, params );
 }
 
 void gldlTexImage1D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexImage1D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
-	gldlTexImage1D_impl( target, level, internalformat, width, border, format, type, GLvoid );
+	gldlTexImage1D_impl( target, level, internalformat, width, border, format, type, pixels );
 }
 
 void gldlTexImage2D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
-	gldlTexImage2D_impl( target, level, internalformat, width, height, border, format, type, GLvoid );
+	gldlTexImage2D_impl( target, level, internalformat, width, height, border, format, type, pixels );
 }
 
 void gldlDrawBuffer ( GLenum mode, const char *arg0, const char *file, int line ) {
@@ -1338,12 +1344,12 @@ void gldlEnable ( GLenum cap, const char *arg0, const char *file, int line ) {
 
 void gldlFinish ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFinish();\n", file, line );
-	gldlFinish_impl( );
+	gldlFinish_impl(  );
 }
 
 void gldlFlush ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFlush();\n", file, line );
-	gldlFlush_impl( );
+	gldlFlush_impl(  );
 }
 
 void gldlBlendFunc ( GLenum sfactor, GLenum dfactor, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1388,67 +1394,67 @@ void gldlReadBuffer ( GLenum mode, const char *arg0, const char *file, int line 
 
 void gldlReadPixels ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glReadPixels( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlReadPixels_impl( x, y, width, height, format, type, *pixels );
+	gldlReadPixels_impl( x, y, width, height, format, type, pixels );
 }
 
 void gldlGetBooleanv ( GLenum pname, GLboolean *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBooleanv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetBooleanv_impl( pname, *params );
+	gldlGetBooleanv_impl( pname, params );
 }
 
 void gldlGetDoublev ( GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetDoublev( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetDoublev_impl( pname, *params );
+	gldlGetDoublev_impl( pname, params );
 }
 
 GLenum gldlGetError ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetError();\n", file, line );
-	gldlGetError_impl( );
+	return gldlGetError_impl(  );
 }
 
 void gldlGetFloatv ( GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFloatv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetFloatv_impl( pname, *params );
+	gldlGetFloatv_impl( pname, params );
 }
 
 void gldlGetIntegerv ( GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetIntegerv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetIntegerv_impl( pname, *params );
+	gldlGetIntegerv_impl( pname, params );
 }
 
 const GLubyte * gldlGetString ( GLenum name, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetString( %s );\n", file, line,  arg0 );
-	gldlGetString_impl( name );
+	return gldlGetString_impl( name );
 }
 
 void gldlGetTexImage ( GLenum target, GLint level, GLenum format, GLenum type, GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexImage( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetTexImage_impl( target, level, format, type, *pixels );
+	gldlGetTexImage_impl( target, level, format, type, pixels );
 }
 
 void gldlGetTexParameterfv ( GLenum target, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetTexParameterfv_impl( target, pname, *params );
+	gldlGetTexParameterfv_impl( target, pname, params );
 }
 
 void gldlGetTexParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetTexParameteriv_impl( target, pname, *params );
+	gldlGetTexParameteriv_impl( target, pname, params );
 }
 
 void gldlGetTexLevelParameterfv ( GLenum target, GLint level, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexLevelParameterfv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetTexLevelParameterfv_impl( target, level, pname, *params );
+	gldlGetTexLevelParameterfv_impl( target, level, pname, params );
 }
 
 void gldlGetTexLevelParameteriv ( GLenum target, GLint level, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexLevelParameteriv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetTexLevelParameteriv_impl( target, level, pname, *params );
+	gldlGetTexLevelParameteriv_impl( target, level, pname, params );
 }
 
 GLboolean gldlIsEnabled ( GLenum cap, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsEnabled( %s );\n", file, line,  arg0 );
-	gldlIsEnabled_impl( cap );
+	return gldlIsEnabled_impl( cap );
 }
 
 void gldlDepthRange ( GLclampd near, GLclampd far, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1468,12 +1474,12 @@ void gldlDrawArrays ( GLenum mode, GLint first, GLsizei count, const char *arg0,
 
 void gldlDrawElements ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElements( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlDrawElements_impl( mode, count, type, GLvoid );
+	gldlDrawElements_impl( mode, count, type, indices );
 }
 
 void gldlGetPointerv ( GLenum pname, GLvoid* *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetPointerv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetPointerv_impl( pname, *params );
+	gldlGetPointerv_impl( pname, params );
 }
 
 void gldlPolygonOffset ( GLfloat factor, GLfloat units, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1503,12 +1509,12 @@ void gldlCopyTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yo
 
 void gldlTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexSubImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlTexSubImage1D_impl( target, level, xoffset, width, format, type, GLvoid );
+	gldlTexSubImage1D_impl( target, level, xoffset, width, format, type, pixels );
 }
 
 void gldlTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
-	gldlTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, type, GLvoid );
+	gldlTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, type, pixels );
 }
 
 void gldlBindTexture ( GLenum target, GLuint texture, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1518,17 +1524,17 @@ void gldlBindTexture ( GLenum target, GLuint texture, const char *arg0, const ch
 
 void gldlDeleteTextures ( GLsizei n, const GLuint *textures, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteTextures( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteTextures_impl( n, GLuint );
+	gldlDeleteTextures_impl( n, textures );
 }
 
 void gldlGenTextures ( GLsizei n, GLuint *textures, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenTextures( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenTextures_impl( n, *textures );
+	gldlGenTextures_impl( n, textures );
 }
 
 GLboolean gldlIsTexture ( GLuint texture, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsTexture( %s );\n", file, line,  arg0 );
-	gldlIsTexture_impl( texture );
+	return gldlIsTexture_impl( texture );
 }
 
 void gldlBlendColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -1543,17 +1549,17 @@ void gldlBlendEquation ( GLenum mode, const char *arg0, const char *file, int li
 
 void gldlDrawRangeElements ( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawRangeElements( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlDrawRangeElements_impl( mode, start, end, count, type, GLvoid );
+	gldlDrawRangeElements_impl( mode, start, end, count, type, indices );
 }
 
 void gldlTexImage3D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,  arg9 );
-	gldlTexImage3D_impl( target, level, internalformat, width, height, depth, border, format, type, GLvoid );
+	gldlTexImage3D_impl( target, level, internalformat, width, height, depth, border, format, type, pixels );
 }
 
 void gldlTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *arg10, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9,  arg10 );
-	gldlTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, GLvoid );
+	gldlTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels );
 }
 
 void gldlCopyTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
@@ -1573,37 +1579,37 @@ void gldlSampleCoverage ( GLclampf value, GLboolean invert, const char *arg0, co
 
 void gldlCompressedTexImage3D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
-	gldlCompressedTexImage3D_impl( target, level, internalformat, width, height, depth, border, imageSize, GLvoid );
+	gldlCompressedTexImage3D_impl( target, level, internalformat, width, height, depth, border, imageSize, data );
 }
 
 void gldlCompressedTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
-	gldlCompressedTexImage2D_impl( target, level, internalformat, width, height, border, imageSize, GLvoid );
+	gldlCompressedTexImage2D_impl( target, level, internalformat, width, height, border, imageSize, data );
 }
 
 void gldlCompressedTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlCompressedTexImage1D_impl( target, level, internalformat, width, border, imageSize, GLvoid );
+	gldlCompressedTexImage1D_impl( target, level, internalformat, width, border, imageSize, data );
 }
 
 void gldlCompressedTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *arg10, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9,  arg10 );
-	gldlCompressedTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, GLvoid );
+	gldlCompressedTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data );
 }
 
 void gldlCompressedTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
-	gldlCompressedTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, imageSize, GLvoid );
+	gldlCompressedTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, imageSize, data );
 }
 
 void gldlCompressedTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlCompressedTexSubImage1D_impl( target, level, xoffset, width, format, imageSize, GLvoid );
+	gldlCompressedTexSubImage1D_impl( target, level, xoffset, width, format, imageSize, data );
 }
 
 void gldlGetCompressedTexImage ( GLenum target, GLint level, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetCompressedTexImage( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetCompressedTexImage_impl( target, level, *img );
+	gldlGetCompressedTexImage_impl( target, level, img );
 }
 
 void gldlBlendFuncSeparate ( GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -1613,12 +1619,12 @@ void gldlBlendFuncSeparate ( GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfacto
 
 void gldlMultiDrawArrays ( GLenum mode, const GLint *first, const GLsizei *count, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiDrawArrays( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlMultiDrawArrays_impl( mode, GLint const *count, primcount );
+	gldlMultiDrawArrays_impl( mode, first, count, primcount );
 }
 
 void gldlMultiDrawElements ( GLenum mode, const GLsizei *count, GLenum type, const GLvoid* *indices, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiDrawElements( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlMultiDrawElements_impl( mode, GLsizei GLenum const *indices, primcount );
+	gldlMultiDrawElements_impl( mode, count, type, indices, primcount );
 }
 
 void gldlPointParameterf ( GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1628,7 +1634,7 @@ void gldlPointParameterf ( GLenum pname, GLfloat param, const char *arg0, const 
 
 void gldlPointParameterfv ( GLenum pname, const GLfloat *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPointParameterfv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlPointParameterfv_impl( pname, GLfloat );
+	gldlPointParameterfv_impl( pname, params );
 }
 
 void gldlPointParameteri ( GLenum pname, GLint param, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1638,22 +1644,22 @@ void gldlPointParameteri ( GLenum pname, GLint param, const char *arg0, const ch
 
 void gldlPointParameteriv ( GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPointParameteriv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlPointParameteriv_impl( pname, GLint );
+	gldlPointParameteriv_impl( pname, params );
 }
 
 void gldlGenQueries ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenQueries( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenQueries_impl( n, *ids );
+	gldlGenQueries_impl( n, ids );
 }
 
 void gldlDeleteQueries ( GLsizei n, const GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteQueries( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteQueries_impl( n, GLuint );
+	gldlDeleteQueries_impl( n, ids );
 }
 
 GLboolean gldlIsQuery ( GLuint id, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsQuery( %s );\n", file, line,  arg0 );
-	gldlIsQuery_impl( id );
+	return gldlIsQuery_impl( id );
 }
 
 void gldlBeginQuery ( GLenum target, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1668,17 +1674,17 @@ void gldlEndQuery ( GLenum target, const char *arg0, const char *file, int line 
 
 void gldlGetQueryiv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetQueryiv_impl( target, pname, *params );
+	gldlGetQueryiv_impl( target, pname, params );
 }
 
 void gldlGetQueryObjectiv ( GLuint id, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryObjectiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetQueryObjectiv_impl( id, pname, *params );
+	gldlGetQueryObjectiv_impl( id, pname, params );
 }
 
 void gldlGetQueryObjectuiv ( GLuint id, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryObjectuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetQueryObjectuiv_impl( id, pname, *params );
+	gldlGetQueryObjectuiv_impl( id, pname, params );
 }
 
 void gldlBindBuffer ( GLenum target, GLuint buffer, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1688,52 +1694,52 @@ void gldlBindBuffer ( GLenum target, GLuint buffer, const char *arg0, const char
 
 void gldlDeleteBuffers ( GLsizei n, const GLuint *buffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteBuffers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteBuffers_impl( n, GLuint );
+	gldlDeleteBuffers_impl( n, buffers );
 }
 
 void gldlGenBuffers ( GLsizei n, GLuint *buffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenBuffers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenBuffers_impl( n, *buffers );
+	gldlGenBuffers_impl( n, buffers );
 }
 
 GLboolean gldlIsBuffer ( GLuint buffer, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsBuffer( %s );\n", file, line,  arg0 );
-	gldlIsBuffer_impl( buffer );
+	return gldlIsBuffer_impl( buffer );
 }
 
 void gldlBufferData ( GLenum target, GLsizeiptr size, const GLvoid *data, GLenum usage, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBufferData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlBufferData_impl( target, size, GLvoid GLenum );
+	gldlBufferData_impl( target, size, data, usage );
 }
 
 void gldlBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBufferSubData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlBufferSubData_impl( target, offset, size, GLvoid );
+	gldlBufferSubData_impl( target, offset, size, data );
 }
 
 void gldlGetBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBufferSubData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetBufferSubData_impl( target, offset, size, *data );
+	gldlGetBufferSubData_impl( target, offset, size, data );
 }
 
 GLvoid* gldlMapBuffer ( GLenum target, GLenum access, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMapBuffer( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlMapBuffer_impl( target, access );
+	return gldlMapBuffer_impl( target, access );
 }
 
 GLboolean gldlUnmapBuffer ( GLenum target, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUnmapBuffer( %s );\n", file, line,  arg0 );
-	gldlUnmapBuffer_impl( target );
+	return gldlUnmapBuffer_impl( target );
 }
 
 void gldlGetBufferParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBufferParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetBufferParameteriv_impl( target, pname, *params );
+	gldlGetBufferParameteriv_impl( target, pname, params );
 }
 
 void gldlGetBufferPointerv ( GLenum target, GLenum pname, GLvoid* *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBufferPointerv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetBufferPointerv_impl( target, pname, *params );
+	gldlGetBufferPointerv_impl( target, pname, params );
 }
 
 void gldlBlendEquationSeparate ( GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -1743,7 +1749,7 @@ void gldlBlendEquationSeparate ( GLenum modeRGB, GLenum modeAlpha, const char *a
 
 void gldlDrawBuffers ( GLsizei n, const GLenum *bufs, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawBuffers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDrawBuffers_impl( n, GLenum );
+	gldlDrawBuffers_impl( n, bufs );
 }
 
 void gldlStencilOpSeparate ( GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -1768,7 +1774,7 @@ void gldlAttachShader ( GLuint program, GLuint shader, const char *arg0, const c
 
 void gldlBindAttribLocation ( GLuint program, GLuint index, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindAttribLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlBindAttribLocation_impl( program, index, GLchar );
+	gldlBindAttribLocation_impl( program, index, name );
 }
 
 void gldlCompileShader ( GLuint shader, const char *arg0, const char *file, int line ) {
@@ -1778,12 +1784,12 @@ void gldlCompileShader ( GLuint shader, const char *arg0, const char *file, int 
 
 GLuint gldlCreateProgram ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCreateProgram();\n", file, line );
-	gldlCreateProgram_impl( );
+	return gldlCreateProgram_impl(  );
 }
 
 GLuint gldlCreateShader ( GLenum type, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCreateShader( %s );\n", file, line,  arg0 );
-	gldlCreateShader_impl( type );
+	return gldlCreateShader_impl( type );
 }
 
 void gldlDeleteProgram ( GLuint program, const char *arg0, const char *file, int line ) {
@@ -1813,92 +1819,92 @@ void gldlEnableVertexAttribArray ( GLuint index, const char *arg0, const char *f
 
 void gldlGetActiveAttrib ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveAttrib( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlGetActiveAttrib_impl( program, index, bufSize, *length, *size, *type, *name );
+	gldlGetActiveAttrib_impl( program, index, bufSize, length, size, type, name );
 }
 
 void gldlGetActiveUniform ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniform( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlGetActiveUniform_impl( program, index, bufSize, *length, *size, *type, *name );
+	gldlGetActiveUniform_impl( program, index, bufSize, length, size, type, name );
 }
 
 void gldlGetAttachedShaders ( GLuint program, GLsizei maxCount, GLsizei *count, GLuint *obj, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetAttachedShaders( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetAttachedShaders_impl( program, maxCount, *count, *obj );
+	gldlGetAttachedShaders_impl( program, maxCount, count, obj );
 }
 
 GLint gldlGetAttribLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetAttribLocation( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetAttribLocation_impl( program, GLchar );
+	return gldlGetAttribLocation_impl( program, name );
 }
 
 void gldlGetProgramiv ( GLuint program, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetProgramiv_impl( program, pname, *params );
+	gldlGetProgramiv_impl( program, pname, params );
 }
 
 void gldlGetProgramInfoLog ( GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetProgramInfoLog_impl( program, bufSize, *length, *infoLog );
+	gldlGetProgramInfoLog_impl( program, bufSize, length, infoLog );
 }
 
 void gldlGetShaderiv ( GLuint shader, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetShaderiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetShaderiv_impl( shader, pname, *params );
+	gldlGetShaderiv_impl( shader, pname, params );
 }
 
 void gldlGetShaderInfoLog ( GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetShaderInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetShaderInfoLog_impl( shader, bufSize, *length, *infoLog );
+	gldlGetShaderInfoLog_impl( shader, bufSize, length, infoLog );
 }
 
 void gldlGetShaderSource ( GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetShaderSource( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetShaderSource_impl( shader, bufSize, *length, *source );
+	gldlGetShaderSource_impl( shader, bufSize, length, source );
 }
 
 GLint gldlGetUniformLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformLocation( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetUniformLocation_impl( program, GLchar );
+	return gldlGetUniformLocation_impl( program, name );
 }
 
 void gldlGetUniformfv ( GLuint program, GLint location, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetUniformfv_impl( program, location, *params );
+	gldlGetUniformfv_impl( program, location, params );
 }
 
 void gldlGetUniformiv ( GLuint program, GLint location, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetUniformiv_impl( program, location, *params );
+	gldlGetUniformiv_impl( program, location, params );
 }
 
 void gldlGetVertexAttribdv ( GLuint index, GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetVertexAttribdv_impl( index, pname, *params );
+	gldlGetVertexAttribdv_impl( index, pname, params );
 }
 
 void gldlGetVertexAttribfv ( GLuint index, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetVertexAttribfv_impl( index, pname, *params );
+	gldlGetVertexAttribfv_impl( index, pname, params );
 }
 
 void gldlGetVertexAttribiv ( GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetVertexAttribiv_impl( index, pname, *params );
+	gldlGetVertexAttribiv_impl( index, pname, params );
 }
 
 void gldlGetVertexAttribPointerv ( GLuint index, GLenum pname, GLvoid* *pointer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribPointerv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetVertexAttribPointerv_impl( index, pname, *pointer );
+	gldlGetVertexAttribPointerv_impl( index, pname, pointer );
 }
 
 GLboolean gldlIsProgram ( GLuint program, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsProgram( %s );\n", file, line,  arg0 );
-	gldlIsProgram_impl( program );
+	return gldlIsProgram_impl( program );
 }
 
 GLboolean gldlIsShader ( GLuint shader, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsShader( %s );\n", file, line,  arg0 );
-	gldlIsShader_impl( shader );
+	return gldlIsShader_impl( shader );
 }
 
 void gldlLinkProgram ( GLuint program, const char *arg0, const char *file, int line ) {
@@ -1908,7 +1914,7 @@ void gldlLinkProgram ( GLuint program, const char *arg0, const char *file, int l
 
 void gldlShaderSource ( GLuint shader, GLsizei count, const GLchar* *string, const GLint *length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glShaderSource( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlShaderSource_impl( shader, count, GLchar* const *length );
+	gldlShaderSource_impl( shader, count, string, length );
 }
 
 void gldlUseProgram ( GLuint program, const char *arg0, const char *file, int line ) {
@@ -1958,57 +1964,57 @@ void gldlUniform4i ( GLint location, GLint v0, GLint v1, GLint v2, GLint v3, con
 
 void gldlUniform1fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform1fv_impl( location, count, GLfloat );
+	gldlUniform1fv_impl( location, count, value );
 }
 
 void gldlUniform2fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform2fv_impl( location, count, GLfloat );
+	gldlUniform2fv_impl( location, count, value );
 }
 
 void gldlUniform3fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform3fv_impl( location, count, GLfloat );
+	gldlUniform3fv_impl( location, count, value );
 }
 
 void gldlUniform4fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform4fv_impl( location, count, GLfloat );
+	gldlUniform4fv_impl( location, count, value );
 }
 
 void gldlUniform1iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform1iv_impl( location, count, GLint );
+	gldlUniform1iv_impl( location, count, value );
 }
 
 void gldlUniform2iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform2iv_impl( location, count, GLint );
+	gldlUniform2iv_impl( location, count, value );
 }
 
 void gldlUniform3iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform3iv_impl( location, count, GLint );
+	gldlUniform3iv_impl( location, count, value );
 }
 
 void gldlUniform4iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform4iv_impl( location, count, GLint );
+	gldlUniform4iv_impl( location, count, value );
 }
 
 void gldlUniformMatrix2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix2fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix2fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix3fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix3fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix4fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix4fv_impl( location, count, transpose, value );
 }
 
 void gldlValidateProgram ( GLuint program, const char *arg0, const char *file, int line ) {
@@ -2023,7 +2029,7 @@ void gldlVertexAttrib1d ( GLuint index, GLdouble x, const char *arg0, const char
 
 void gldlVertexAttrib1dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1dv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib1dv_impl( index, GLdouble );
+	gldlVertexAttrib1dv_impl( index, v );
 }
 
 void gldlVertexAttrib1f ( GLuint index, GLfloat x, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2033,7 +2039,7 @@ void gldlVertexAttrib1f ( GLuint index, GLfloat x, const char *arg0, const char 
 
 void gldlVertexAttrib1fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1fv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib1fv_impl( index, GLfloat );
+	gldlVertexAttrib1fv_impl( index, v );
 }
 
 void gldlVertexAttrib1s ( GLuint index, GLshort x, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2043,7 +2049,7 @@ void gldlVertexAttrib1s ( GLuint index, GLshort x, const char *arg0, const char 
 
 void gldlVertexAttrib1sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1sv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib1sv_impl( index, GLshort );
+	gldlVertexAttrib1sv_impl( index, v );
 }
 
 void gldlVertexAttrib2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -2053,7 +2059,7 @@ void gldlVertexAttrib2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0
 
 void gldlVertexAttrib2dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2dv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib2dv_impl( index, GLdouble );
+	gldlVertexAttrib2dv_impl( index, v );
 }
 
 void gldlVertexAttrib2f ( GLuint index, GLfloat x, GLfloat y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -2063,7 +2069,7 @@ void gldlVertexAttrib2f ( GLuint index, GLfloat x, GLfloat y, const char *arg0, 
 
 void gldlVertexAttrib2fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2fv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib2fv_impl( index, GLfloat );
+	gldlVertexAttrib2fv_impl( index, v );
 }
 
 void gldlVertexAttrib2s ( GLuint index, GLshort x, GLshort y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -2073,7 +2079,7 @@ void gldlVertexAttrib2s ( GLuint index, GLshort x, GLshort y, const char *arg0, 
 
 void gldlVertexAttrib2sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2sv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib2sv_impl( index, GLshort );
+	gldlVertexAttrib2sv_impl( index, v );
 }
 
 void gldlVertexAttrib3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -2083,7 +2089,7 @@ void gldlVertexAttrib3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, cons
 
 void gldlVertexAttrib3dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3dv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib3dv_impl( index, GLdouble );
+	gldlVertexAttrib3dv_impl( index, v );
 }
 
 void gldlVertexAttrib3f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -2093,7 +2099,7 @@ void gldlVertexAttrib3f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, const c
 
 void gldlVertexAttrib3fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3fv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib3fv_impl( index, GLfloat );
+	gldlVertexAttrib3fv_impl( index, v );
 }
 
 void gldlVertexAttrib3s ( GLuint index, GLshort x, GLshort y, GLshort z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -2103,22 +2109,22 @@ void gldlVertexAttrib3s ( GLuint index, GLshort x, GLshort y, GLshort z, const c
 
 void gldlVertexAttrib3sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3sv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib3sv_impl( index, GLshort );
+	gldlVertexAttrib3sv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nbv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nbv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4Nbv_impl( index, GLbyte );
+	gldlVertexAttrib4Nbv_impl( index, v );
 }
 
 void gldlVertexAttrib4Niv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Niv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4Niv_impl( index, GLint );
+	gldlVertexAttrib4Niv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nsv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nsv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4Nsv_impl( index, GLshort );
+	gldlVertexAttrib4Nsv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nub ( GLuint index, GLubyte x, GLubyte y, GLubyte z, GLubyte w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -2128,22 +2134,22 @@ void gldlVertexAttrib4Nub ( GLuint index, GLubyte x, GLubyte y, GLubyte z, GLuby
 
 void gldlVertexAttrib4Nubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nubv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4Nubv_impl( index, GLubyte );
+	gldlVertexAttrib4Nubv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nuiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nuiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4Nuiv_impl( index, GLuint );
+	gldlVertexAttrib4Nuiv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nusv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nusv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4Nusv_impl( index, GLushort );
+	gldlVertexAttrib4Nusv_impl( index, v );
 }
 
 void gldlVertexAttrib4bv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4bv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4bv_impl( index, GLbyte );
+	gldlVertexAttrib4bv_impl( index, v );
 }
 
 void gldlVertexAttrib4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -2153,7 +2159,7 @@ void gldlVertexAttrib4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdo
 
 void gldlVertexAttrib4dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4dv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4dv_impl( index, GLdouble );
+	gldlVertexAttrib4dv_impl( index, v );
 }
 
 void gldlVertexAttrib4f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -2163,12 +2169,12 @@ void gldlVertexAttrib4f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat
 
 void gldlVertexAttrib4fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4fv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4fv_impl( index, GLfloat );
+	gldlVertexAttrib4fv_impl( index, v );
 }
 
 void gldlVertexAttrib4iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4iv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4iv_impl( index, GLint );
+	gldlVertexAttrib4iv_impl( index, v );
 }
 
 void gldlVertexAttrib4s ( GLuint index, GLshort x, GLshort y, GLshort z, GLshort w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -2178,57 +2184,57 @@ void gldlVertexAttrib4s ( GLuint index, GLshort x, GLshort y, GLshort z, GLshort
 
 void gldlVertexAttrib4sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4sv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4sv_impl( index, GLshort );
+	gldlVertexAttrib4sv_impl( index, v );
 }
 
 void gldlVertexAttrib4ubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4ubv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4ubv_impl( index, GLubyte );
+	gldlVertexAttrib4ubv_impl( index, v );
 }
 
 void gldlVertexAttrib4uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4uiv_impl( index, GLuint );
+	gldlVertexAttrib4uiv_impl( index, v );
 }
 
 void gldlVertexAttrib4usv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4usv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttrib4usv_impl( index, GLushort );
+	gldlVertexAttrib4usv_impl( index, v );
 }
 
 void gldlVertexAttribPointer ( GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribPointer( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlVertexAttribPointer_impl( index, size, type, normalized, stride, GLvoid );
+	gldlVertexAttribPointer_impl( index, size, type, normalized, stride, pointer );
 }
 
 void gldlUniformMatrix2x3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2x3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix2x3fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix2x3fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3x2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3x2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix3x2fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix3x2fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix2x4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2x4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix2x4fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix2x4fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4x2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4x2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix4x2fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix4x2fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3x4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3x4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix3x4fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix3x4fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4x3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4x3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix4x3fv_impl( location, count, transpose, GLfloat );
+	gldlUniformMatrix4x3fv_impl( location, count, transpose, value );
 }
 
 void gldlColorMaski ( GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboolean a, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -2238,12 +2244,12 @@ void gldlColorMaski ( GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboo
 
 void gldlGetBooleani_v ( GLenum target, GLuint index, GLboolean *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBooleani_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetBooleani_v_impl( target, index, *data );
+	gldlGetBooleani_v_impl( target, index, data );
 }
 
 void gldlGetIntegeri_v ( GLenum target, GLuint index, GLint *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetIntegeri_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetIntegeri_v_impl( target, index, *data );
+	gldlGetIntegeri_v_impl( target, index, data );
 }
 
 void gldlEnablei ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2258,7 +2264,7 @@ void gldlDisablei ( GLenum target, GLuint index, const char *arg0, const char *a
 
 GLboolean gldlIsEnabledi ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsEnabledi( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlIsEnabledi_impl( target, index );
+	return gldlIsEnabledi_impl( target, index );
 }
 
 void gldlBeginTransformFeedback ( GLenum primitiveMode, const char *arg0, const char *file, int line ) {
@@ -2268,7 +2274,7 @@ void gldlBeginTransformFeedback ( GLenum primitiveMode, const char *arg0, const 
 
 void gldlEndTransformFeedback ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEndTransformFeedback();\n", file, line );
-	gldlEndTransformFeedback_impl( );
+	gldlEndTransformFeedback_impl(  );
 }
 
 void gldlBindBufferRange ( GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -2283,12 +2289,12 @@ void gldlBindBufferBase ( GLenum target, GLuint index, GLuint buffer, const char
 
 void gldlTransformFeedbackVaryings ( GLuint program, GLsizei count, const GLchar* *varyings, GLenum bufferMode, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTransformFeedbackVaryings( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlTransformFeedbackVaryings_impl( program, count, GLchar* GLenum );
+	gldlTransformFeedbackVaryings_impl( program, count, varyings, bufferMode );
 }
 
 void gldlGetTransformFeedbackVarying ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTransformFeedbackVarying( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlGetTransformFeedbackVarying_impl( program, index, bufSize, *length, *size, *type, *name );
+	gldlGetTransformFeedbackVarying_impl( program, index, bufSize, length, size, type, name );
 }
 
 void gldlClampColor ( GLenum target, GLenum clamp, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2303,22 +2309,22 @@ void gldlBeginConditionalRender ( GLuint id, GLenum mode, const char *arg0, cons
 
 void gldlEndConditionalRender ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEndConditionalRender();\n", file, line );
-	gldlEndConditionalRender_impl( );
+	gldlEndConditionalRender_impl(  );
 }
 
 void gldlVertexAttribIPointer ( GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribIPointer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlVertexAttribIPointer_impl( index, size, type, stride, GLvoid );
+	gldlVertexAttribIPointer_impl( index, size, type, stride, pointer );
 }
 
 void gldlGetVertexAttribIiv ( GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetVertexAttribIiv_impl( index, pname, *params );
+	gldlGetVertexAttribIiv_impl( index, pname, params );
 }
 
 void gldlGetVertexAttribIuiv ( GLuint index, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetVertexAttribIuiv_impl( index, pname, *params );
+	gldlGetVertexAttribIuiv_impl( index, pname, params );
 }
 
 void gldlVertexAttribI1i ( GLuint index, GLint x, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2363,77 +2369,77 @@ void gldlVertexAttribI4ui ( GLuint index, GLuint x, GLuint y, GLuint z, GLuint w
 
 void gldlVertexAttribI1iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI1iv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI1iv_impl( index, GLint );
+	gldlVertexAttribI1iv_impl( index, v );
 }
 
 void gldlVertexAttribI2iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI2iv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI2iv_impl( index, GLint );
+	gldlVertexAttribI2iv_impl( index, v );
 }
 
 void gldlVertexAttribI3iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI3iv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI3iv_impl( index, GLint );
+	gldlVertexAttribI3iv_impl( index, v );
 }
 
 void gldlVertexAttribI4iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4iv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI4iv_impl( index, GLint );
+	gldlVertexAttribI4iv_impl( index, v );
 }
 
 void gldlVertexAttribI1uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI1uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI1uiv_impl( index, GLuint );
+	gldlVertexAttribI1uiv_impl( index, v );
 }
 
 void gldlVertexAttribI2uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI2uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI2uiv_impl( index, GLuint );
+	gldlVertexAttribI2uiv_impl( index, v );
 }
 
 void gldlVertexAttribI3uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI3uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI3uiv_impl( index, GLuint );
+	gldlVertexAttribI3uiv_impl( index, v );
 }
 
 void gldlVertexAttribI4uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI4uiv_impl( index, GLuint );
+	gldlVertexAttribI4uiv_impl( index, v );
 }
 
 void gldlVertexAttribI4bv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4bv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI4bv_impl( index, GLbyte );
+	gldlVertexAttribI4bv_impl( index, v );
 }
 
 void gldlVertexAttribI4sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4sv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI4sv_impl( index, GLshort );
+	gldlVertexAttribI4sv_impl( index, v );
 }
 
 void gldlVertexAttribI4ubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4ubv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI4ubv_impl( index, GLubyte );
+	gldlVertexAttribI4ubv_impl( index, v );
 }
 
 void gldlVertexAttribI4usv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4usv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribI4usv_impl( index, GLushort );
+	gldlVertexAttribI4usv_impl( index, v );
 }
 
 void gldlGetUniformuiv ( GLuint program, GLint location, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetUniformuiv_impl( program, location, *params );
+	gldlGetUniformuiv_impl( program, location, params );
 }
 
 void gldlBindFragDataLocation ( GLuint program, GLuint color, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindFragDataLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlBindFragDataLocation_impl( program, color, GLchar );
+	gldlBindFragDataLocation_impl( program, color, name );
 }
 
 GLint gldlGetFragDataLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFragDataLocation( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetFragDataLocation_impl( program, GLchar );
+	return gldlGetFragDataLocation_impl( program, name );
 }
 
 void gldlUniform1ui ( GLint location, GLuint v0, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2458,57 +2464,57 @@ void gldlUniform4ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3
 
 void gldlUniform1uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform1uiv_impl( location, count, GLuint );
+	gldlUniform1uiv_impl( location, count, value );
 }
 
 void gldlUniform2uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform2uiv_impl( location, count, GLuint );
+	gldlUniform2uiv_impl( location, count, value );
 }
 
 void gldlUniform3uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform3uiv_impl( location, count, GLuint );
+	gldlUniform3uiv_impl( location, count, value );
 }
 
 void gldlUniform4uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform4uiv_impl( location, count, GLuint );
+	gldlUniform4uiv_impl( location, count, value );
 }
 
 void gldlTexParameterIiv ( GLenum target, GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlTexParameterIiv_impl( target, pname, GLint );
+	gldlTexParameterIiv_impl( target, pname, params );
 }
 
 void gldlTexParameterIuiv ( GLenum target, GLenum pname, const GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlTexParameterIuiv_impl( target, pname, GLuint );
+	gldlTexParameterIuiv_impl( target, pname, params );
 }
 
 void gldlGetTexParameterIiv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetTexParameterIiv_impl( target, pname, *params );
+	gldlGetTexParameterIiv_impl( target, pname, params );
 }
 
 void gldlGetTexParameterIuiv ( GLenum target, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetTexParameterIuiv_impl( target, pname, *params );
+	gldlGetTexParameterIuiv_impl( target, pname, params );
 }
 
 void gldlClearBufferiv ( GLenum buffer, GLint drawbuffer, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearBufferiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlClearBufferiv_impl( buffer, drawbuffer, GLint );
+	gldlClearBufferiv_impl( buffer, drawbuffer, value );
 }
 
 void gldlClearBufferuiv ( GLenum buffer, GLint drawbuffer, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearBufferuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlClearBufferuiv_impl( buffer, drawbuffer, GLuint );
+	gldlClearBufferuiv_impl( buffer, drawbuffer, value );
 }
 
 void gldlClearBufferfv ( GLenum buffer, GLint drawbuffer, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearBufferfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlClearBufferfv_impl( buffer, drawbuffer, GLfloat );
+	gldlClearBufferfv_impl( buffer, drawbuffer, value );
 }
 
 void gldlClearBufferfi ( GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -2518,7 +2524,7 @@ void gldlClearBufferfi ( GLenum buffer, GLint drawbuffer, GLfloat depth, GLint s
 
 const GLubyte * gldlGetStringi ( GLenum name, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetStringi( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetStringi_impl( name, index );
+	return gldlGetStringi_impl( name, index );
 }
 
 void gldlDrawArraysInstanced ( GLenum mode, GLint first, GLsizei count, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -2528,7 +2534,7 @@ void gldlDrawArraysInstanced ( GLenum mode, GLint first, GLsizei count, GLsizei 
 
 void gldlDrawElementsInstanced ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsInstanced( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlDrawElementsInstanced_impl( mode, count, type, GLvoid GLsizei );
+	gldlDrawElementsInstanced_impl( mode, count, type, indices, primcount );
 }
 
 void gldlTexBuffer ( GLenum target, GLenum internalformat, GLuint buffer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -2543,12 +2549,12 @@ void gldlPrimitiveRestartIndex ( GLuint index, const char *arg0, const char *fil
 
 void gldlGetInteger64i_v ( GLenum target, GLuint index, GLint64 *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetInteger64i_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetInteger64i_v_impl( target, index, *data );
+	gldlGetInteger64i_v_impl( target, index, data );
 }
 
 void gldlGetBufferParameteri64v ( GLenum target, GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBufferParameteri64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetBufferParameteri64v_impl( target, pname, *params );
+	gldlGetBufferParameteri64v_impl( target, pname, params );
 }
 
 void gldlFramebufferTexture ( GLenum target, GLenum attachment, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -2588,7 +2594,7 @@ void gldlBlendFuncSeparatei ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum s
 
 GLboolean gldlIsRenderbuffer ( GLuint renderbuffer, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsRenderbuffer( %s );\n", file, line,  arg0 );
-	gldlIsRenderbuffer_impl( renderbuffer );
+	return gldlIsRenderbuffer_impl( renderbuffer );
 }
 
 void gldlBindRenderbuffer ( GLenum target, GLuint renderbuffer, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2598,12 +2604,12 @@ void gldlBindRenderbuffer ( GLenum target, GLuint renderbuffer, const char *arg0
 
 void gldlDeleteRenderbuffers ( GLsizei n, const GLuint *renderbuffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteRenderbuffers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteRenderbuffers_impl( n, GLuint );
+	gldlDeleteRenderbuffers_impl( n, renderbuffers );
 }
 
 void gldlGenRenderbuffers ( GLsizei n, GLuint *renderbuffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenRenderbuffers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenRenderbuffers_impl( n, *renderbuffers );
+	gldlGenRenderbuffers_impl( n, renderbuffers );
 }
 
 void gldlRenderbufferStorage ( GLenum target, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -2613,12 +2619,12 @@ void gldlRenderbufferStorage ( GLenum target, GLenum internalformat, GLsizei wid
 
 void gldlGetRenderbufferParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetRenderbufferParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetRenderbufferParameteriv_impl( target, pname, *params );
+	gldlGetRenderbufferParameteriv_impl( target, pname, params );
 }
 
 GLboolean gldlIsFramebuffer ( GLuint framebuffer, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsFramebuffer( %s );\n", file, line,  arg0 );
-	gldlIsFramebuffer_impl( framebuffer );
+	return gldlIsFramebuffer_impl( framebuffer );
 }
 
 void gldlBindFramebuffer ( GLenum target, GLuint framebuffer, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2628,17 +2634,17 @@ void gldlBindFramebuffer ( GLenum target, GLuint framebuffer, const char *arg0, 
 
 void gldlDeleteFramebuffers ( GLsizei n, const GLuint *framebuffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteFramebuffers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteFramebuffers_impl( n, GLuint );
+	gldlDeleteFramebuffers_impl( n, framebuffers );
 }
 
 void gldlGenFramebuffers ( GLsizei n, GLuint *framebuffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenFramebuffers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenFramebuffers_impl( n, *framebuffers );
+	gldlGenFramebuffers_impl( n, framebuffers );
 }
 
 GLenum gldlCheckFramebufferStatus ( GLenum target, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCheckFramebufferStatus( %s );\n", file, line,  arg0 );
-	gldlCheckFramebufferStatus_impl( target );
+	return gldlCheckFramebufferStatus_impl( target );
 }
 
 void gldlFramebufferTexture1D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -2663,7 +2669,7 @@ void gldlFramebufferRenderbuffer ( GLenum target, GLenum attachment, GLenum rend
 
 void gldlGetFramebufferAttachmentParameteriv ( GLenum target, GLenum attachment, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFramebufferAttachmentParameteriv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetFramebufferAttachmentParameteriv_impl( target, attachment, pname, *params );
+	gldlGetFramebufferAttachmentParameteriv_impl( target, attachment, pname, params );
 }
 
 void gldlGenerateMipmap ( GLenum target, const char *arg0, const char *file, int line ) {
@@ -2688,7 +2694,7 @@ void gldlFramebufferTextureLayer ( GLenum target, GLenum attachment, GLuint text
 
 GLvoid* gldlMapBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMapBufferRange( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlMapBufferRange_impl( target, offset, length, access );
+	return gldlMapBufferRange_impl( target, offset, length, access );
 }
 
 void gldlFlushMappedBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -2703,47 +2709,47 @@ void gldlBindVertexArray ( GLuint array, const char *arg0, const char *file, int
 
 void gldlDeleteVertexArrays ( GLsizei n, const GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteVertexArrays( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteVertexArrays_impl( n, GLuint );
+	gldlDeleteVertexArrays_impl( n, arrays );
 }
 
 void gldlGenVertexArrays ( GLsizei n, GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenVertexArrays( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenVertexArrays_impl( n, *arrays );
+	gldlGenVertexArrays_impl( n, arrays );
 }
 
 GLboolean gldlIsVertexArray ( GLuint array, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsVertexArray( %s );\n", file, line,  arg0 );
-	gldlIsVertexArray_impl( array );
+	return gldlIsVertexArray_impl( array );
 }
 
 void gldlGetUniformIndices ( GLuint program, GLsizei uniformCount, const GLchar* *uniformNames, GLuint *uniformIndices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformIndices( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetUniformIndices_impl( program, uniformCount, GLchar* GLuint );
+	gldlGetUniformIndices_impl( program, uniformCount, uniformNames, uniformIndices );
 }
 
 void gldlGetActiveUniformsiv ( GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniformsiv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetActiveUniformsiv_impl( program, uniformCount, GLuint GLenum GLint );
+	gldlGetActiveUniformsiv_impl( program, uniformCount, uniformIndices, pname, params );
 }
 
 void gldlGetActiveUniformName ( GLuint program, GLuint uniformIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformName, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniformName( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetActiveUniformName_impl( program, uniformIndex, bufSize, *length, *uniformName );
+	gldlGetActiveUniformName_impl( program, uniformIndex, bufSize, length, uniformName );
 }
 
 GLuint gldlGetUniformBlockIndex ( GLuint program, const GLchar *uniformBlockName, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformBlockIndex( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetUniformBlockIndex_impl( program, GLchar );
+	return gldlGetUniformBlockIndex_impl( program, uniformBlockName );
 }
 
 void gldlGetActiveUniformBlockiv ( GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniformBlockiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetActiveUniformBlockiv_impl( program, uniformBlockIndex, pname, *params );
+	gldlGetActiveUniformBlockiv_impl( program, uniformBlockIndex, pname, params );
 }
 
 void gldlGetActiveUniformBlockName ( GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniformBlockName( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetActiveUniformBlockName_impl( program, uniformBlockIndex, bufSize, *length, *uniformBlockName );
+	gldlGetActiveUniformBlockName_impl( program, uniformBlockIndex, bufSize, length, uniformBlockName );
 }
 
 void gldlUniformBlockBinding ( GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -2758,22 +2764,22 @@ void gldlCopyBufferSubData ( GLenum readTarget, GLenum writeTarget, GLintptr rea
 
 void gldlDrawElementsBaseVertex ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsBaseVertex( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlDrawElementsBaseVertex_impl( mode, count, type, GLvoid GLint );
+	gldlDrawElementsBaseVertex_impl( mode, count, type, indices, basevertex );
 }
 
 void gldlDrawRangeElementsBaseVertex ( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawRangeElementsBaseVertex( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlDrawRangeElementsBaseVertex_impl( mode, start, end, count, type, GLvoid GLint );
+	gldlDrawRangeElementsBaseVertex_impl( mode, start, end, count, type, indices, basevertex );
 }
 
 void gldlDrawElementsInstancedBaseVertex ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei primcount, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseVertex( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlDrawElementsInstancedBaseVertex_impl( mode, count, type, GLvoid GLsizei GLint );
+	gldlDrawElementsInstancedBaseVertex_impl( mode, count, type, indices, primcount, basevertex );
 }
 
 void gldlMultiDrawElementsBaseVertex ( GLenum mode, const GLsizei *count, GLenum type, const GLvoid* *indices, GLsizei primcount, const GLint *basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiDrawElementsBaseVertex( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlMultiDrawElementsBaseVertex_impl( mode, GLsizei GLenum const *indices, primcount, GLint );
+	gldlMultiDrawElementsBaseVertex_impl( mode, count, type, indices, primcount, basevertex );
 }
 
 void gldlProvokingVertex ( GLenum mode, const char *arg0, const char *file, int line ) {
@@ -2783,12 +2789,12 @@ void gldlProvokingVertex ( GLenum mode, const char *arg0, const char *file, int 
 
 GLsync gldlFenceSync ( GLenum condition, GLbitfield flags, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFenceSync( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlFenceSync_impl( condition, flags );
+	return gldlFenceSync_impl( condition, flags );
 }
 
 GLboolean gldlIsSync ( GLsync sync, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsSync( %s );\n", file, line,  arg0 );
-	gldlIsSync_impl( sync );
+	return gldlIsSync_impl( sync );
 }
 
 void gldlDeleteSync ( GLsync sync, const char *arg0, const char *file, int line ) {
@@ -2798,7 +2804,7 @@ void gldlDeleteSync ( GLsync sync, const char *arg0, const char *file, int line 
 
 GLenum gldlClientWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClientWaitSync( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlClientWaitSync_impl( sync, flags, timeout );
+	return gldlClientWaitSync_impl( sync, flags, timeout );
 }
 
 void gldlWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -2808,12 +2814,12 @@ void gldlWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char 
 
 void gldlGetInteger64v ( GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetInteger64v( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetInteger64v_impl( pname, *params );
+	gldlGetInteger64v_impl( pname, params );
 }
 
 void gldlGetSynciv ( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSynciv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetSynciv_impl( sync, pname, bufSize, *length, *values );
+	gldlGetSynciv_impl( sync, pname, bufSize, length, values );
 }
 
 void gldlTexImage2DMultisample ( GLenum target, GLsizei samples, GLint internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
@@ -2828,7 +2834,7 @@ void gldlTexImage3DMultisample ( GLenum target, GLsizei samples, GLint internalf
 
 void gldlGetMultisamplefv ( GLenum pname, GLuint index, GLfloat *val, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetMultisamplefv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetMultisamplefv_impl( pname, index, *val );
+	gldlGetMultisamplefv_impl( pname, index, val );
 }
 
 void gldlSampleMaski ( GLuint index, GLbitfield mask, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2863,57 +2869,57 @@ void gldlMinSampleShadingARB ( GLclampf value, const char *arg0, const char *fil
 
 void gldlNamedStringARB ( GLenum type, GLint namelen, const GLchar *name, GLint stringlen, const GLchar *string, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glNamedStringARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlNamedStringARB_impl( type, namelen, GLchar GLint const *string );
+	gldlNamedStringARB_impl( type, namelen, name, stringlen, string );
 }
 
 void gldlDeleteNamedStringARB ( GLint namelen, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteNamedStringARB( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteNamedStringARB_impl( namelen, GLchar );
+	gldlDeleteNamedStringARB_impl( namelen, name );
 }
 
 void gldlCompileShaderIncludeARB ( GLuint shader, GLsizei count, const GLchar* *path, const GLint *length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompileShaderIncludeARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlCompileShaderIncludeARB_impl( shader, count, GLchar* const *length );
+	gldlCompileShaderIncludeARB_impl( shader, count, path, length );
 }
 
 GLboolean gldlIsNamedStringARB ( GLint namelen, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsNamedStringARB( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlIsNamedStringARB_impl( namelen, GLchar );
+	return gldlIsNamedStringARB_impl( namelen, name );
 }
 
 void gldlGetNamedStringARB ( GLint namelen, const GLchar *name, GLsizei bufSize, GLint *stringlen, GLchar *string, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetNamedStringARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetNamedStringARB_impl( namelen, GLchar GLsizei GLint GLchar );
+	gldlGetNamedStringARB_impl( namelen, name, bufSize, stringlen, string );
 }
 
 void gldlGetNamedStringivARB ( GLint namelen, const GLchar *name, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetNamedStringivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetNamedStringivARB_impl( namelen, GLchar GLenum GLint );
+	gldlGetNamedStringivARB_impl( namelen, name, pname, params );
 }
 
 void gldlBindFragDataLocationIndexed ( GLuint program, GLuint colorNumber, GLuint index, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindFragDataLocationIndexed( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlBindFragDataLocationIndexed_impl( program, colorNumber, index, GLchar );
+	gldlBindFragDataLocationIndexed_impl( program, colorNumber, index, name );
 }
 
 GLint gldlGetFragDataIndex ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFragDataIndex( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetFragDataIndex_impl( program, GLchar );
+	return gldlGetFragDataIndex_impl( program, name );
 }
 
 void gldlGenSamplers ( GLsizei count, GLuint *samplers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenSamplers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenSamplers_impl( count, *samplers );
+	gldlGenSamplers_impl( count, samplers );
 }
 
 void gldlDeleteSamplers ( GLsizei count, const GLuint *samplers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteSamplers( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteSamplers_impl( count, GLuint );
+	gldlDeleteSamplers_impl( count, samplers );
 }
 
 GLboolean gldlIsSampler ( GLuint sampler, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsSampler( %s );\n", file, line,  arg0 );
-	gldlIsSampler_impl( sampler );
+	return gldlIsSampler_impl( sampler );
 }
 
 void gldlBindSampler ( GLuint unit, GLuint sampler, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2928,7 +2934,7 @@ void gldlSamplerParameteri ( GLuint sampler, GLenum pname, GLint param, const ch
 
 void gldlSamplerParameteriv ( GLuint sampler, GLenum pname, const GLint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlSamplerParameteriv_impl( sampler, pname, GLint );
+	gldlSamplerParameteriv_impl( sampler, pname, param );
 }
 
 void gldlSamplerParameterf ( GLuint sampler, GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -2938,37 +2944,37 @@ void gldlSamplerParameterf ( GLuint sampler, GLenum pname, GLfloat param, const 
 
 void gldlSamplerParameterfv ( GLuint sampler, GLenum pname, const GLfloat *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlSamplerParameterfv_impl( sampler, pname, GLfloat );
+	gldlSamplerParameterfv_impl( sampler, pname, param );
 }
 
 void gldlSamplerParameterIiv ( GLuint sampler, GLenum pname, const GLint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlSamplerParameterIiv_impl( sampler, pname, GLint );
+	gldlSamplerParameterIiv_impl( sampler, pname, param );
 }
 
 void gldlSamplerParameterIuiv ( GLuint sampler, GLenum pname, const GLuint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlSamplerParameterIuiv_impl( sampler, pname, GLuint );
+	gldlSamplerParameterIuiv_impl( sampler, pname, param );
 }
 
 void gldlGetSamplerParameteriv ( GLuint sampler, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSamplerParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetSamplerParameteriv_impl( sampler, pname, *params );
+	gldlGetSamplerParameteriv_impl( sampler, pname, params );
 }
 
 void gldlGetSamplerParameterIiv ( GLuint sampler, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSamplerParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetSamplerParameterIiv_impl( sampler, pname, *params );
+	gldlGetSamplerParameterIiv_impl( sampler, pname, params );
 }
 
 void gldlGetSamplerParameterfv ( GLuint sampler, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSamplerParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetSamplerParameterfv_impl( sampler, pname, *params );
+	gldlGetSamplerParameterfv_impl( sampler, pname, params );
 }
 
 void gldlGetSamplerParameterIuiv ( GLuint sampler, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSamplerParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetSamplerParameterIuiv_impl( sampler, pname, *params );
+	gldlGetSamplerParameterIuiv_impl( sampler, pname, params );
 }
 
 void gldlQueryCounter ( GLuint id, GLenum target, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2978,12 +2984,12 @@ void gldlQueryCounter ( GLuint id, GLenum target, const char *arg0, const char *
 
 void gldlGetQueryObjecti64v ( GLuint id, GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryObjecti64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetQueryObjecti64v_impl( id, pname, *params );
+	gldlGetQueryObjecti64v_impl( id, pname, params );
 }
 
 void gldlGetQueryObjectui64v ( GLuint id, GLenum pname, GLuint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryObjectui64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetQueryObjectui64v_impl( id, pname, *params );
+	gldlGetQueryObjectui64v_impl( id, pname, params );
 }
 
 void gldlVertexP2ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -2993,7 +2999,7 @@ void gldlVertexP2ui ( GLenum type, GLuint value, const char *arg0, const char *a
 
 void gldlVertexP2uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP2uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexP2uiv_impl( type, GLuint );
+	gldlVertexP2uiv_impl( type, value );
 }
 
 void gldlVertexP3ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3003,7 +3009,7 @@ void gldlVertexP3ui ( GLenum type, GLuint value, const char *arg0, const char *a
 
 void gldlVertexP3uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexP3uiv_impl( type, GLuint );
+	gldlVertexP3uiv_impl( type, value );
 }
 
 void gldlVertexP4ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3013,7 +3019,7 @@ void gldlVertexP4ui ( GLenum type, GLuint value, const char *arg0, const char *a
 
 void gldlVertexP4uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexP4uiv_impl( type, GLuint );
+	gldlVertexP4uiv_impl( type, value );
 }
 
 void gldlTexCoordP1ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3023,7 +3029,7 @@ void gldlTexCoordP1ui ( GLenum type, GLuint coords, const char *arg0, const char
 
 void gldlTexCoordP1uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP1uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlTexCoordP1uiv_impl( type, GLuint );
+	gldlTexCoordP1uiv_impl( type, coords );
 }
 
 void gldlTexCoordP2ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3033,7 +3039,7 @@ void gldlTexCoordP2ui ( GLenum type, GLuint coords, const char *arg0, const char
 
 void gldlTexCoordP2uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP2uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlTexCoordP2uiv_impl( type, GLuint );
+	gldlTexCoordP2uiv_impl( type, coords );
 }
 
 void gldlTexCoordP3ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3043,7 +3049,7 @@ void gldlTexCoordP3ui ( GLenum type, GLuint coords, const char *arg0, const char
 
 void gldlTexCoordP3uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlTexCoordP3uiv_impl( type, GLuint );
+	gldlTexCoordP3uiv_impl( type, coords );
 }
 
 void gldlTexCoordP4ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3053,7 +3059,7 @@ void gldlTexCoordP4ui ( GLenum type, GLuint coords, const char *arg0, const char
 
 void gldlTexCoordP4uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlTexCoordP4uiv_impl( type, GLuint );
+	gldlTexCoordP4uiv_impl( type, coords );
 }
 
 void gldlMultiTexCoordP1ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3063,7 +3069,7 @@ void gldlMultiTexCoordP1ui ( GLenum texture, GLenum type, GLuint coords, const c
 
 void gldlMultiTexCoordP1uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP1uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlMultiTexCoordP1uiv_impl( texture, type, GLuint );
+	gldlMultiTexCoordP1uiv_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP2ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3073,7 +3079,7 @@ void gldlMultiTexCoordP2ui ( GLenum texture, GLenum type, GLuint coords, const c
 
 void gldlMultiTexCoordP2uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP2uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlMultiTexCoordP2uiv_impl( texture, type, GLuint );
+	gldlMultiTexCoordP2uiv_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP3ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3083,7 +3089,7 @@ void gldlMultiTexCoordP3ui ( GLenum texture, GLenum type, GLuint coords, const c
 
 void gldlMultiTexCoordP3uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP3uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlMultiTexCoordP3uiv_impl( texture, type, GLuint );
+	gldlMultiTexCoordP3uiv_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP4ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3093,7 +3099,7 @@ void gldlMultiTexCoordP4ui ( GLenum texture, GLenum type, GLuint coords, const c
 
 void gldlMultiTexCoordP4uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP4uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlMultiTexCoordP4uiv_impl( texture, type, GLuint );
+	gldlMultiTexCoordP4uiv_impl( texture, type, coords );
 }
 
 void gldlNormalP3ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3103,7 +3109,7 @@ void gldlNormalP3ui ( GLenum type, GLuint coords, const char *arg0, const char *
 
 void gldlNormalP3uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glNormalP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlNormalP3uiv_impl( type, GLuint );
+	gldlNormalP3uiv_impl( type, coords );
 }
 
 void gldlColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3113,7 +3119,7 @@ void gldlColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *ar
 
 void gldlColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glColorP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlColorP3uiv_impl( type, GLuint );
+	gldlColorP3uiv_impl( type, color );
 }
 
 void gldlColorP4ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3123,7 +3129,7 @@ void gldlColorP4ui ( GLenum type, GLuint color, const char *arg0, const char *ar
 
 void gldlColorP4uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glColorP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlColorP4uiv_impl( type, GLuint );
+	gldlColorP4uiv_impl( type, color );
 }
 
 void gldlSecondaryColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3133,7 +3139,7 @@ void gldlSecondaryColorP3ui ( GLenum type, GLuint color, const char *arg0, const
 
 void gldlSecondaryColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSecondaryColorP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlSecondaryColorP3uiv_impl( type, GLuint );
+	gldlSecondaryColorP3uiv_impl( type, color );
 }
 
 void gldlVertexAttribP1ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -3143,7 +3149,7 @@ void gldlVertexAttribP1ui ( GLuint index, GLenum type, GLboolean normalized, GLu
 
 void gldlVertexAttribP1uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP1uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlVertexAttribP1uiv_impl( index, type, normalized, GLuint );
+	gldlVertexAttribP1uiv_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP2ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -3153,7 +3159,7 @@ void gldlVertexAttribP2ui ( GLuint index, GLenum type, GLboolean normalized, GLu
 
 void gldlVertexAttribP2uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP2uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlVertexAttribP2uiv_impl( index, type, normalized, GLuint );
+	gldlVertexAttribP2uiv_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP3ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -3163,7 +3169,7 @@ void gldlVertexAttribP3ui ( GLuint index, GLenum type, GLboolean normalized, GLu
 
 void gldlVertexAttribP3uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP3uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlVertexAttribP3uiv_impl( index, type, normalized, GLuint );
+	gldlVertexAttribP3uiv_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP4ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -3173,17 +3179,17 @@ void gldlVertexAttribP4ui ( GLuint index, GLenum type, GLboolean normalized, GLu
 
 void gldlVertexAttribP4uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP4uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlVertexAttribP4uiv_impl( index, type, normalized, GLuint );
+	gldlVertexAttribP4uiv_impl( index, type, normalized, value );
 }
 
 void gldlDrawArraysIndirect ( GLenum mode, const GLvoid *indirect, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawArraysIndirect( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDrawArraysIndirect_impl( mode, GLvoid );
+	gldlDrawArraysIndirect_impl( mode, indirect );
 }
 
 void gldlDrawElementsIndirect ( GLenum mode, GLenum type, const GLvoid *indirect, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsIndirect( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlDrawElementsIndirect_impl( mode, type, GLvoid );
+	gldlDrawElementsIndirect_impl( mode, type, indirect );
 }
 
 void gldlUniform1d ( GLint location, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3208,112 +3214,112 @@ void gldlUniform4d ( GLint location, GLdouble x, GLdouble y, GLdouble z, GLdoubl
 
 void gldlUniform1dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform1dv_impl( location, count, GLdouble );
+	gldlUniform1dv_impl( location, count, value );
 }
 
 void gldlUniform2dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform2dv_impl( location, count, GLdouble );
+	gldlUniform2dv_impl( location, count, value );
 }
 
 void gldlUniform3dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform3dv_impl( location, count, GLdouble );
+	gldlUniform3dv_impl( location, count, value );
 }
 
 void gldlUniform4dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniform4dv_impl( location, count, GLdouble );
+	gldlUniform4dv_impl( location, count, value );
 }
 
 void gldlUniformMatrix2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix2dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix2dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix3dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix3dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix4dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix4dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix2x3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2x3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix2x3dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix2x3dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix2x4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2x4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix2x4dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix2x4dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3x2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3x2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix3x2dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix3x2dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3x4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3x4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix3x4dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix3x4dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4x2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4x2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix4x2dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix4x2dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4x3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4x3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlUniformMatrix4x3dv_impl( location, count, transpose, GLdouble );
+	gldlUniformMatrix4x3dv_impl( location, count, transpose, value );
 }
 
 void gldlGetUniformdv ( GLuint program, GLint location, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetUniformdv_impl( program, location, *params );
+	gldlGetUniformdv_impl( program, location, params );
 }
 
 GLint gldlGetSubroutineUniformLocation ( GLuint program, GLenum shadertype, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSubroutineUniformLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetSubroutineUniformLocation_impl( program, shadertype, GLchar );
+	return gldlGetSubroutineUniformLocation_impl( program, shadertype, name );
 }
 
 GLuint gldlGetSubroutineIndex ( GLuint program, GLenum shadertype, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSubroutineIndex( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetSubroutineIndex_impl( program, shadertype, GLchar );
+	return gldlGetSubroutineIndex_impl( program, shadertype, name );
 }
 
 void gldlGetActiveSubroutineUniformiv ( GLuint program, GLenum shadertype, GLuint index, GLenum pname, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineUniformiv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetActiveSubroutineUniformiv_impl( program, shadertype, index, pname, *values );
+	gldlGetActiveSubroutineUniformiv_impl( program, shadertype, index, pname, values );
 }
 
 void gldlGetActiveSubroutineUniformName ( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineUniformName( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlGetActiveSubroutineUniformName_impl( program, shadertype, index, bufsize, *length, *name );
+	gldlGetActiveSubroutineUniformName_impl( program, shadertype, index, bufsize, length, name );
 }
 
 void gldlGetActiveSubroutineName ( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineName( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlGetActiveSubroutineName_impl( program, shadertype, index, bufsize, *length, *name );
+	gldlGetActiveSubroutineName_impl( program, shadertype, index, bufsize, length, name );
 }
 
 void gldlUniformSubroutinesuiv ( GLenum shadertype, GLsizei count, const GLuint *indices, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformSubroutinesuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlUniformSubroutinesuiv_impl( shadertype, count, GLuint );
+	gldlUniformSubroutinesuiv_impl( shadertype, count, indices );
 }
 
 void gldlGetUniformSubroutineuiv ( GLenum shadertype, GLint location, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformSubroutineuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetUniformSubroutineuiv_impl( shadertype, location, *params );
+	gldlGetUniformSubroutineuiv_impl( shadertype, location, params );
 }
 
 void gldlGetProgramStageiv ( GLuint program, GLenum shadertype, GLenum pname, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramStageiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetProgramStageiv_impl( program, shadertype, pname, *values );
+	gldlGetProgramStageiv_impl( program, shadertype, pname, values );
 }
 
 void gldlPatchParameteri ( GLenum pname, GLint value, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3323,7 +3329,7 @@ void gldlPatchParameteri ( GLenum pname, GLint value, const char *arg0, const ch
 
 void gldlPatchParameterfv ( GLenum pname, const GLfloat *values, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPatchParameterfv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlPatchParameterfv_impl( pname, GLfloat );
+	gldlPatchParameterfv_impl( pname, values );
 }
 
 void gldlBindTransformFeedback ( GLenum target, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3333,27 +3339,27 @@ void gldlBindTransformFeedback ( GLenum target, GLuint id, const char *arg0, con
 
 void gldlDeleteTransformFeedbacks ( GLsizei n, const GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteTransformFeedbacks( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteTransformFeedbacks_impl( n, GLuint );
+	gldlDeleteTransformFeedbacks_impl( n, ids );
 }
 
 void gldlGenTransformFeedbacks ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenTransformFeedbacks( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenTransformFeedbacks_impl( n, *ids );
+	gldlGenTransformFeedbacks_impl( n, ids );
 }
 
 GLboolean gldlIsTransformFeedback ( GLuint id, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsTransformFeedback( %s );\n", file, line,  arg0 );
-	gldlIsTransformFeedback_impl( id );
+	return gldlIsTransformFeedback_impl( id );
 }
 
 void gldlPauseTransformFeedback ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPauseTransformFeedback();\n", file, line );
-	gldlPauseTransformFeedback_impl( );
+	gldlPauseTransformFeedback_impl(  );
 }
 
 void gldlResumeTransformFeedback ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glResumeTransformFeedback();\n", file, line );
-	gldlResumeTransformFeedback_impl( );
+	gldlResumeTransformFeedback_impl(  );
 }
 
 void gldlDrawTransformFeedback ( GLenum mode, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3378,22 +3384,22 @@ void gldlEndQueryIndexed ( GLenum target, GLuint index, const char *arg0, const 
 
 void gldlGetQueryIndexediv ( GLenum target, GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryIndexediv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetQueryIndexediv_impl( target, index, pname, *params );
+	gldlGetQueryIndexediv_impl( target, index, pname, params );
 }
 
 void gldlReleaseShaderCompiler ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glReleaseShaderCompiler();\n", file, line );
-	gldlReleaseShaderCompiler_impl( );
+	gldlReleaseShaderCompiler_impl(  );
 }
 
 void gldlShaderBinary ( GLsizei count, const GLuint *shaders, GLenum binaryformat, const GLvoid *binary, GLsizei length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glShaderBinary( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlShaderBinary_impl( count, GLuint GLenum const *binary, length );
+	gldlShaderBinary_impl( count, shaders, binaryformat, binary, length );
 }
 
 void gldlGetShaderPrecisionFormat ( GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetShaderPrecisionFormat( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetShaderPrecisionFormat_impl( shadertype, precisiontype, *range, *precision );
+	gldlGetShaderPrecisionFormat_impl( shadertype, precisiontype, range, precision );
 }
 
 void gldlDepthRangef ( GLclampf n, GLclampf f, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3408,12 +3414,12 @@ void gldlClearDepthf ( GLclampf d, const char *arg0, const char *file, int line 
 
 void gldlGetProgramBinary ( GLuint program, GLsizei bufSize, GLsizei *length, GLenum *binaryFormat, GLvoid *binary, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramBinary( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetProgramBinary_impl( program, bufSize, *length, *binaryFormat, *binary );
+	gldlGetProgramBinary_impl( program, bufSize, length, binaryFormat, binary );
 }
 
 void gldlProgramBinary ( GLuint program, GLenum binaryFormat, const GLvoid *binary, GLsizei length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramBinary( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramBinary_impl( program, binaryFormat, GLvoid GLsizei );
+	gldlProgramBinary_impl( program, binaryFormat, binary, length );
 }
 
 void gldlProgramParameteri ( GLuint program, GLenum pname, GLint value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3433,7 +3439,7 @@ void gldlActiveShaderProgram ( GLuint pipeline, GLuint program, const char *arg0
 
 GLuint gldlCreateShaderProgramv ( GLenum type, GLsizei count, const GLchar* *strings, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCreateShaderProgramv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlCreateShaderProgramv_impl( type, count, GLchar* );
+	return gldlCreateShaderProgramv_impl( type, count, strings );
 }
 
 void gldlBindProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
@@ -3443,22 +3449,22 @@ void gldlBindProgramPipeline ( GLuint pipeline, const char *arg0, const char *fi
 
 void gldlDeleteProgramPipelines ( GLsizei n, const GLuint *pipelines, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteProgramPipelines( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDeleteProgramPipelines_impl( n, GLuint );
+	gldlDeleteProgramPipelines_impl( n, pipelines );
 }
 
 void gldlGenProgramPipelines ( GLsizei n, GLuint *pipelines, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenProgramPipelines( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGenProgramPipelines_impl( n, *pipelines );
+	gldlGenProgramPipelines_impl( n, pipelines );
 }
 
 GLboolean gldlIsProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsProgramPipeline( %s );\n", file, line,  arg0 );
-	gldlIsProgramPipeline_impl( pipeline );
+	return gldlIsProgramPipeline_impl( pipeline );
 }
 
 void gldlGetProgramPipelineiv ( GLuint pipeline, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramPipelineiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetProgramPipelineiv_impl( pipeline, pname, *params );
+	gldlGetProgramPipelineiv_impl( pipeline, pname, params );
 }
 
 void gldlProgramUniform1i ( GLuint program, GLint location, GLint v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3468,7 +3474,7 @@ void gldlProgramUniform1i ( GLuint program, GLint location, GLint v0, const char
 
 void gldlProgramUniform1iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform1iv_impl( program, location, count, GLint );
+	gldlProgramUniform1iv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform1f ( GLuint program, GLint location, GLfloat v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3478,7 +3484,7 @@ void gldlProgramUniform1f ( GLuint program, GLint location, GLfloat v0, const ch
 
 void gldlProgramUniform1fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform1fv_impl( program, location, count, GLfloat );
+	gldlProgramUniform1fv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform1d ( GLuint program, GLint location, GLdouble v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3488,7 +3494,7 @@ void gldlProgramUniform1d ( GLuint program, GLint location, GLdouble v0, const c
 
 void gldlProgramUniform1dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform1dv_impl( program, location, count, GLdouble );
+	gldlProgramUniform1dv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform1ui ( GLuint program, GLint location, GLuint v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3498,7 +3504,7 @@ void gldlProgramUniform1ui ( GLuint program, GLint location, GLuint v0, const ch
 
 void gldlProgramUniform1uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform1uiv_impl( program, location, count, GLuint );
+	gldlProgramUniform1uiv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform2i ( GLuint program, GLint location, GLint v0, GLint v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -3508,7 +3514,7 @@ void gldlProgramUniform2i ( GLuint program, GLint location, GLint v0, GLint v1, 
 
 void gldlProgramUniform2iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform2iv_impl( program, location, count, GLint );
+	gldlProgramUniform2iv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform2f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -3518,7 +3524,7 @@ void gldlProgramUniform2f ( GLuint program, GLint location, GLfloat v0, GLfloat 
 
 void gldlProgramUniform2fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform2fv_impl( program, location, count, GLfloat );
+	gldlProgramUniform2fv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform2d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -3528,7 +3534,7 @@ void gldlProgramUniform2d ( GLuint program, GLint location, GLdouble v0, GLdoubl
 
 void gldlProgramUniform2dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform2dv_impl( program, location, count, GLdouble );
+	gldlProgramUniform2dv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform2ui ( GLuint program, GLint location, GLuint v0, GLuint v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
@@ -3538,7 +3544,7 @@ void gldlProgramUniform2ui ( GLuint program, GLint location, GLuint v0, GLuint v
 
 void gldlProgramUniform2uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform2uiv_impl( program, location, count, GLuint );
+	gldlProgramUniform2uiv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform3i ( GLuint program, GLint location, GLint v0, GLint v1, GLint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -3548,7 +3554,7 @@ void gldlProgramUniform3i ( GLuint program, GLint location, GLint v0, GLint v1, 
 
 void gldlProgramUniform3iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform3iv_impl( program, location, count, GLint );
+	gldlProgramUniform3iv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform3f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -3558,7 +3564,7 @@ void gldlProgramUniform3f ( GLuint program, GLint location, GLfloat v0, GLfloat 
 
 void gldlProgramUniform3fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform3fv_impl( program, location, count, GLfloat );
+	gldlProgramUniform3fv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform3d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, GLdouble v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -3568,7 +3574,7 @@ void gldlProgramUniform3d ( GLuint program, GLint location, GLdouble v0, GLdoubl
 
 void gldlProgramUniform3dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform3dv_impl( program, location, count, GLdouble );
+	gldlProgramUniform3dv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform3ui ( GLuint program, GLint location, GLuint v0, GLuint v1, GLuint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -3578,7 +3584,7 @@ void gldlProgramUniform3ui ( GLuint program, GLint location, GLuint v0, GLuint v
 
 void gldlProgramUniform3uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform3uiv_impl( program, location, count, GLuint );
+	gldlProgramUniform3uiv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform4i ( GLuint program, GLint location, GLint v0, GLint v1, GLint v2, GLint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
@@ -3588,7 +3594,7 @@ void gldlProgramUniform4i ( GLuint program, GLint location, GLint v0, GLint v1, 
 
 void gldlProgramUniform4iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform4iv_impl( program, location, count, GLint );
+	gldlProgramUniform4iv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform4f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
@@ -3598,7 +3604,7 @@ void gldlProgramUniform4f ( GLuint program, GLint location, GLfloat v0, GLfloat 
 
 void gldlProgramUniform4fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform4fv_impl( program, location, count, GLfloat );
+	gldlProgramUniform4fv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform4d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, GLdouble v2, GLdouble v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
@@ -3608,7 +3614,7 @@ void gldlProgramUniform4d ( GLuint program, GLint location, GLdouble v0, GLdoubl
 
 void gldlProgramUniform4dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform4dv_impl( program, location, count, GLdouble );
+	gldlProgramUniform4dv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform4ui ( GLuint program, GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
@@ -3618,97 +3624,97 @@ void gldlProgramUniform4ui ( GLuint program, GLint location, GLuint v0, GLuint v
 
 void gldlProgramUniform4uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlProgramUniform4uiv_impl( program, location, count, GLuint );
+	gldlProgramUniform4uiv_impl( program, location, count, value );
 }
 
 void gldlProgramUniformMatrix2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix2fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix2fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix3fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix3fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix4fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix4fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix2dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix2dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix3dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix3dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix4dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix4dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2x3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix2x3fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix2x3fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3x2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix3x2fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix3x2fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2x4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix2x4fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix2x4fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4x2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix4x2fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix4x2fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3x4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix3x4fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix3x4fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4x3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix4x3fv_impl( program, location, count, transpose, GLfloat );
+	gldlProgramUniformMatrix4x3fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2x3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix2x3dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix2x3dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3x2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix3x2dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix3x2dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2x4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix2x4dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix2x4dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4x2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix4x2dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix4x2dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3x4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix3x4dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix3x4dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4x3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlProgramUniformMatrix4x3dv_impl( program, location, count, transpose, GLdouble );
+	gldlProgramUniformMatrix4x3dv_impl( program, location, count, transpose, value );
 }
 
 void gldlValidateProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
@@ -3718,7 +3724,7 @@ void gldlValidateProgramPipeline ( GLuint pipeline, const char *arg0, const char
 
 void gldlGetProgramPipelineInfoLog ( GLuint pipeline, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramPipelineInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetProgramPipelineInfoLog_impl( pipeline, bufSize, *length, *infoLog );
+	gldlGetProgramPipelineInfoLog_impl( pipeline, bufSize, length, infoLog );
 }
 
 void gldlVertexAttribL1d ( GLuint index, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
@@ -3743,37 +3749,37 @@ void gldlVertexAttribL4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLd
 
 void gldlVertexAttribL1dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL1dv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribL1dv_impl( index, GLdouble );
+	gldlVertexAttribL1dv_impl( index, v );
 }
 
 void gldlVertexAttribL2dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL2dv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribL2dv_impl( index, GLdouble );
+	gldlVertexAttribL2dv_impl( index, v );
 }
 
 void gldlVertexAttribL3dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL3dv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribL3dv_impl( index, GLdouble );
+	gldlVertexAttribL3dv_impl( index, v );
 }
 
 void gldlVertexAttribL4dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL4dv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlVertexAttribL4dv_impl( index, GLdouble );
+	gldlVertexAttribL4dv_impl( index, v );
 }
 
 void gldlVertexAttribLPointer ( GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribLPointer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlVertexAttribLPointer_impl( index, size, type, stride, GLvoid );
+	gldlVertexAttribLPointer_impl( index, size, type, stride, pointer );
 }
 
 void gldlGetVertexAttribLdv ( GLuint index, GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribLdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetVertexAttribLdv_impl( index, pname, *params );
+	gldlGetVertexAttribLdv_impl( index, pname, params );
 }
 
 void gldlViewportArrayv ( GLuint first, GLsizei count, const GLfloat *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glViewportArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlViewportArrayv_impl( first, count, GLfloat );
+	gldlViewportArrayv_impl( first, count, v );
 }
 
 void gldlViewportIndexedf ( GLuint index, GLfloat x, GLfloat y, GLfloat w, GLfloat h, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -3783,12 +3789,12 @@ void gldlViewportIndexedf ( GLuint index, GLfloat x, GLfloat y, GLfloat w, GLflo
 
 void gldlViewportIndexedfv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glViewportIndexedfv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlViewportIndexedfv_impl( index, GLfloat );
+	gldlViewportIndexedfv_impl( index, v );
 }
 
 void gldlScissorArrayv ( GLuint first, GLsizei count, const GLint *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glScissorArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlScissorArrayv_impl( first, count, GLint );
+	gldlScissorArrayv_impl( first, count, v );
 }
 
 void gldlScissorIndexed ( GLuint index, GLint left, GLint bottom, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -3798,12 +3804,12 @@ void gldlScissorIndexed ( GLuint index, GLint left, GLint bottom, GLsizei width,
 
 void gldlScissorIndexedv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glScissorIndexedv( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlScissorIndexedv_impl( index, GLint );
+	gldlScissorIndexedv_impl( index, v );
 }
 
 void gldlDepthRangeArrayv ( GLuint first, GLsizei count, const GLclampd *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDepthRangeArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlDepthRangeArrayv_impl( first, count, GLclampd );
+	gldlDepthRangeArrayv_impl( first, count, v );
 }
 
 void gldlDepthRangeIndexed ( GLuint index, GLclampd n, GLclampd f, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3813,137 +3819,137 @@ void gldlDepthRangeIndexed ( GLuint index, GLclampd n, GLclampd f, const char *a
 
 void gldlGetFloati_v ( GLenum target, GLuint index, GLfloat *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFloati_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetFloati_v_impl( target, index, *data );
+	gldlGetFloati_v_impl( target, index, data );
 }
 
 void gldlGetDoublei_v ( GLenum target, GLuint index, GLdouble *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetDoublei_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetDoublei_v_impl( target, index, *data );
+	gldlGetDoublei_v_impl( target, index, data );
 }
 
 GLsync gldlCreateSyncFromCLeventARB ( struct _cl_context * context, struct _cl_event * event, GLbitfield flags, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCreateSyncFromCLeventARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlCreateSyncFromCLeventARB_impl( _cl_context context, _cl_event event, flags );
+	return gldlCreateSyncFromCLeventARB_impl( context, event, flags );
 }
 
 void gldlDebugMessageControlARB ( GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint *ids, GLboolean enabled, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDebugMessageControlARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlDebugMessageControlARB_impl( source, type, severity, count, GLuint GLboolean );
+	gldlDebugMessageControlARB_impl( source, type, severity, count, ids, enabled );
 }
 
 void gldlDebugMessageInsertARB ( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *buf, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDebugMessageInsertARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlDebugMessageInsertARB_impl( source, type, id, severity, length, GLchar );
+	gldlDebugMessageInsertARB_impl( source, type, id, severity, length, buf );
 }
 
 void gldlDebugMessageCallbackARB ( GLDEBUGPROCARB callback, const GLvoid *userParam, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDebugMessageCallbackARB( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlDebugMessageCallbackARB_impl( callback, GLvoid );
+	gldlDebugMessageCallbackARB_impl( callback, userParam );
 }
 
 GLuint gldlGetDebugMessageLogARB ( GLuint count, GLsizei bufsize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetDebugMessageLogARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
-	gldlGetDebugMessageLogARB_impl( count, bufsize, *sources, *types, *ids, *severities, *lengths, *messageLog );
+	return gldlGetDebugMessageLogARB_impl( count, bufsize, sources, types, ids, severities, lengths, messageLog );
 }
 
 GLenum gldlGetGraphicsResetStatusARB ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetGraphicsResetStatusARB();\n", file, line );
-	gldlGetGraphicsResetStatusARB_impl( );
+	return gldlGetGraphicsResetStatusARB_impl(  );
 }
 
 void gldlGetnMapdvARB ( GLenum target, GLenum query, GLsizei bufSize, GLdouble *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnMapdvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetnMapdvARB_impl( target, query, bufSize, *v );
+	gldlGetnMapdvARB_impl( target, query, bufSize, v );
 }
 
 void gldlGetnMapfvARB ( GLenum target, GLenum query, GLsizei bufSize, GLfloat *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnMapfvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetnMapfvARB_impl( target, query, bufSize, *v );
+	gldlGetnMapfvARB_impl( target, query, bufSize, v );
 }
 
 void gldlGetnMapivARB ( GLenum target, GLenum query, GLsizei bufSize, GLint *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnMapivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetnMapivARB_impl( target, query, bufSize, *v );
+	gldlGetnMapivARB_impl( target, query, bufSize, v );
 }
 
 void gldlGetnPixelMapfvARB ( GLenum map, GLsizei bufSize, GLfloat *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnPixelMapfvARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetnPixelMapfvARB_impl( map, bufSize, *values );
+	gldlGetnPixelMapfvARB_impl( map, bufSize, values );
 }
 
 void gldlGetnPixelMapuivARB ( GLenum map, GLsizei bufSize, GLuint *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnPixelMapuivARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetnPixelMapuivARB_impl( map, bufSize, *values );
+	gldlGetnPixelMapuivARB_impl( map, bufSize, values );
 }
 
 void gldlGetnPixelMapusvARB ( GLenum map, GLsizei bufSize, GLushort *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnPixelMapusvARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
-	gldlGetnPixelMapusvARB_impl( map, bufSize, *values );
+	gldlGetnPixelMapusvARB_impl( map, bufSize, values );
 }
 
 void gldlGetnPolygonStippleARB ( GLsizei bufSize, GLubyte *pattern, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnPolygonStippleARB( %s, %s );\n", file, line, arg0,  arg1 );
-	gldlGetnPolygonStippleARB_impl( bufSize, *pattern );
+	gldlGetnPolygonStippleARB_impl( bufSize, pattern );
 }
 
 void gldlGetnColorTableARB ( GLenum target, GLenum format, GLenum type, GLsizei bufSize, GLvoid *table, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnColorTableARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetnColorTableARB_impl( target, format, type, bufSize, *table );
+	gldlGetnColorTableARB_impl( target, format, type, bufSize, table );
 }
 
 void gldlGetnConvolutionFilterARB ( GLenum target, GLenum format, GLenum type, GLsizei bufSize, GLvoid *image, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnConvolutionFilterARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetnConvolutionFilterARB_impl( target, format, type, bufSize, *image );
+	gldlGetnConvolutionFilterARB_impl( target, format, type, bufSize, image );
 }
 
 void gldlGetnSeparableFilterARB ( GLenum target, GLenum format, GLenum type, GLsizei rowBufSize, GLvoid *row, GLsizei columnBufSize, GLvoid *column, GLvoid *span, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnSeparableFilterARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
-	gldlGetnSeparableFilterARB_impl( target, format, type, rowBufSize, *row, columnBufSize, *column, *span );
+	gldlGetnSeparableFilterARB_impl( target, format, type, rowBufSize, row, columnBufSize, column, span );
 }
 
 void gldlGetnHistogramARB ( GLenum target, GLboolean reset, GLenum format, GLenum type, GLsizei bufSize, GLvoid *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnHistogramARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlGetnHistogramARB_impl( target, reset, format, type, bufSize, *values );
+	gldlGetnHistogramARB_impl( target, reset, format, type, bufSize, values );
 }
 
 void gldlGetnMinmaxARB ( GLenum target, GLboolean reset, GLenum format, GLenum type, GLsizei bufSize, GLvoid *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnMinmaxARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlGetnMinmaxARB_impl( target, reset, format, type, bufSize, *values );
+	gldlGetnMinmaxARB_impl( target, reset, format, type, bufSize, values );
 }
 
 void gldlGetnTexImageARB ( GLenum target, GLint level, GLenum format, GLenum type, GLsizei bufSize, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnTexImageARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlGetnTexImageARB_impl( target, level, format, type, bufSize, *img );
+	gldlGetnTexImageARB_impl( target, level, format, type, bufSize, img );
 }
 
 void gldlReadnPixelsARB ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glReadnPixelsARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
-	gldlReadnPixelsARB_impl( x, y, width, height, format, type, bufSize, *data );
+	gldlReadnPixelsARB_impl( x, y, width, height, format, type, bufSize, data );
 }
 
 void gldlGetnCompressedTexImageARB ( GLenum target, GLint lod, GLsizei bufSize, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnCompressedTexImageARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetnCompressedTexImageARB_impl( target, lod, bufSize, *img );
+	gldlGetnCompressedTexImageARB_impl( target, lod, bufSize, img );
 }
 
 void gldlGetnUniformfvARB ( GLuint program, GLint location, GLsizei bufSize, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnUniformfvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetnUniformfvARB_impl( program, location, bufSize, *params );
+	gldlGetnUniformfvARB_impl( program, location, bufSize, params );
 }
 
 void gldlGetnUniformivARB ( GLuint program, GLint location, GLsizei bufSize, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnUniformivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetnUniformivARB_impl( program, location, bufSize, *params );
+	gldlGetnUniformivARB_impl( program, location, bufSize, params );
 }
 
 void gldlGetnUniformuivARB ( GLuint program, GLint location, GLsizei bufSize, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnUniformuivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetnUniformuivARB_impl( program, location, bufSize, *params );
+	gldlGetnUniformuivARB_impl( program, location, bufSize, params );
 }
 
 void gldlGetnUniformdvARB ( GLuint program, GLint location, GLsizei bufSize, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnUniformdvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetnUniformdvARB_impl( program, location, bufSize, *params );
+	gldlGetnUniformdvARB_impl( program, location, bufSize, params );
 }
 
 void gldlDrawArraysInstancedBaseInstance ( GLenum mode, GLint first, GLsizei count, GLsizei primcount, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
@@ -3953,12 +3959,12 @@ void gldlDrawArraysInstancedBaseInstance ( GLenum mode, GLint first, GLsizei cou
 
 void gldlDrawElementsInstancedBaseInstance ( GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseInstance( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
-	gldlDrawElementsInstancedBaseInstance_impl( mode, count, type, void GLsizei GLuint );
+	gldlDrawElementsInstancedBaseInstance_impl( mode, count, type, indices, primcount, baseinstance );
 }
 
 void gldlDrawElementsInstancedBaseVertexBaseInstance ( GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount, GLint basevertex, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseVertexBaseInstance( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
-	gldlDrawElementsInstancedBaseVertexBaseInstance_impl( mode, count, type, void GLsizei GLint GLuint );
+	gldlDrawElementsInstancedBaseVertexBaseInstance_impl( mode, count, type, indices, primcount, basevertex, baseinstance );
 }
 
 void gldlDrawTransformFeedbackInstanced ( GLenum mode, GLuint id, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
@@ -3973,12 +3979,12 @@ void gldlDrawTransformFeedbackStreamInstanced ( GLenum mode, GLuint id, GLuint s
 
 void gldlGetInternalformativ ( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetInternalformativ( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
-	gldlGetInternalformativ_impl( target, internalformat, pname, bufSize, *params );
+	gldlGetInternalformativ_impl( target, internalformat, pname, bufSize, params );
 }
 
 void gldlGetActiveAtomicCounterBufferiv ( GLuint program, GLuint bufferIndex, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveAtomicCounterBufferiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
-	gldlGetActiveAtomicCounterBufferiv_impl( program, bufferIndex, pname, *params );
+	gldlGetActiveAtomicCounterBufferiv_impl( program, bufferIndex, pname, params );
 }
 
 void gldlBindImageTexture ( GLuint unit, GLuint texture, GLint level, GLboolean layered, GLint layer, GLenum access, GLenum format, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {

@@ -113,6 +113,21 @@ gldl_c.write( r'''
 
 #include "gldl.h"
 
+//////////////////////////////////////////
+// Jump to line 575 for GLDL API functions
+//////////////////////////////////////////
+
+
+// GL FUNCTION POINTERS (GL implementation)
+''')
+
+# Write all GL function pointers
+
+for i in range( len(names) ) :
+    gldl_c.write( "PFN" + names[i].upper() + "PROC gldl" + names[i][2:] + "_impl;\n" )
+
+gldl_c.write( r'''
+
 // WINDOWS
 #if defined(_WIN32) || defined(WIN32)
 #   define WIN32_LEAN_AND_MEAN
@@ -163,8 +178,8 @@ static struct {
 } gl_version;
 
 static int GetGLVersion() {
-    glGetIntegerv( GL_MAJOR_VERSION, &gl_version.major );
-    glGetIntegerv( GL_MINOR_VERSION, &gl_version.minor );
+    gldlGetIntegerv_impl( GL_MAJOR_VERSION, &gl_version.major );
+    gldlGetIntegerv_impl( GL_MINOR_VERSION, &gl_version.minor );
 
     if( gl_version.major < 3 ) return -1;
 
@@ -197,14 +212,7 @@ void gldlDebugFunc( ) {
     char c = 0;
     
 }
-
-// GL FUNCTION POINTERS (GL implementation)
 ''')
-
-# Write all GL function pointers
-
-for i in range( len(names) ) :
-    gldl_c.write( "PFN" + names[i].upper() + "PROC gldl" + names[i][2:] + "_impl;\n" )
 
 
 gldl_c.write( r'''
@@ -229,11 +237,11 @@ gldl_c.write( r'''
 # Write all GLDL functions
 for i in range( len(names) ) :
     # get function param names
-    params = parameters[i].split()
-    param_names = []
-    for j in range( len(params) ) :
-        if( j%2 == 1 ) :
-            param_names.append( params[j] )
+    param_names = parameters[i].split( "," )
+    for j in range( len(param_names) ) :
+        if( param_names[j] != "" ) :
+            param_names[j] = param_names[j].split()[-1]
+            param_names[j] = param_names[j].replace( "*", "" )
 
     # Write signature
     if( parameters_n[i] == 0 ) :
@@ -256,12 +264,18 @@ for i in range( len(names) ) :
             gldl_c.write( "arg" + str(j) + ", " )
         gldl_c.write( " arg" + str(parameters_n[i] - 1) + " );\n" )
 
-    
-    gldl_c.write( "\tgldl" + names[i][2:] + "_impl( " )
-    for param in param_names :
-        gldl_c.write( param + " " )
+   
+    # Return the value of GL impl if needed
+    if( return_types[i] != "void" ) :
+        gldl_c.write( "\treturn " )
+    else :
+        gldl_c.write( "\t" )
 
-    gldl_c.write( ");\n}\n\n" )
+    gldl_c.write( "gldl" + names[i][2:] + "_impl( " )
+    for j in range( parameters_n[i] - 1 ) :
+        gldl_c.write( param_names[j] + ", " )
+
+    gldl_c.write( param_names[parameters_n[i] - 1] + " );\n}\n\n" )
     
 
 
