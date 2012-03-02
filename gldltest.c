@@ -37,6 +37,7 @@ int main() {
                                                                            modes[i].GreenBits +
                                                                            modes[i].BlueBits));
         
+
         // init gldl
         noerr = !gldlInit();
         if( !noerr ) {
@@ -47,6 +48,8 @@ int main() {
             noerr = gldlIsSupported( 3, 3 );
             printf( "GL version 3.3 %ssupported.\n", noerr ? "" : "un" );
         }
+
+        glClearColor( 1.0, 0.8, 0.f, 1.f );
 
         int run = 1;
 
