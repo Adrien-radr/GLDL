@@ -627,7 +627,7 @@ static struct {
 
 
 static int GetGLVersion();
-static void DebugTest( const char *func_name, int func_index, const char *file, int line );
+static int DebugTest( int func_index );
 static void DebugFunction();
 static void LoadProcs();
 
@@ -675,14 +675,14 @@ static int GetGLVersion() {
 }
 
 // Check if a breakpoint is set on the given function
-static void DebugTest( const char *func_name, int func_index, const char *file, int line ) {
+static int DebugTest( int func_index ) {
     for( int i = 0; i < 512; ++i ) {
-        if( -1 == break_functions[i] ) break;
-        if( func_index == break_functions[i] ) {
-            printf( "Breakpoint %d on %s() at %s:%d\n", i, func_name, file, line );
-            DebugFunction();
-        }
+        if( -1 == break_functions[i] ) 
+            break;
+        if( func_index == break_functions[i] ) 
+            return i;
     }
+    return -1;
 }
 
 // Interactive Debug session when a breakpoint arose or during initialization
@@ -699,62 +699,89 @@ static void DebugFunction() {
         gets( line );
         pline = strchr( line, ' ' );
 
-        // if parameters, get them in param
+        // parameter(s) found
         if( pline ) {
             pline[0] = 0;
             param = pline + 1;
-//            printf( "cmd = %s, param = %s\n", cmd, param );
-        }
 
-        if( !strcmp( cmd, "c" ) || !strcmp( cmd, "continue" ) )
-            break;
+            // check for break demand on GL function
+            if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
+                // retrieve function name index
+                int index = -1;
+                for( int i = 0; i < 560; ++i ) {
+                    int cmp = strcmp( param, gl_functions[i] );
 
-        // check for break demand on GL function
-        if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
-            // retrieve function name index
-            int index = -1;
-            for( int i = 0; i < 560; ++i ) {
-                int cmp = strcmp( param, gl_functions[i] );
-
-                if( !cmp ) {
-                    index = i;
-                    break;
-                }
-                else if( cmp < 0 ) {
-                    printf( "%s is not a valid GL function!\n", param );
-                    break;
-                }
-            }
-
-            if( index >= 0 )
-                // insert function name index in next free spot
-                for( int i = 0; i < 512; ++i )
-                    if( -1 == break_functions[i] || -2 == break_functions[i] ) {
-                        break_functions[i] = index;
-                        printf( "Breakpoint %d, %s()\n", i, param );
+                    if( !cmp ) {
+                        index = i;
                         break;
                     }
-        }
+                    else if( cmp < 0 ) {
+                        printf( "%s is not a valid GL function!\n", param );
+                        break;
+                    }
+                }
 
-        // check for breakpoint deletion demand
-        else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
-            int index = atoi( param );
-            if( index >= 512  || ( !index && strcmp( param, "0" ) ) || -1 == break_functions[index] ) {
-                printf( "Breakpoint %s does not exist\n", param );
-            } else {
-                break_functions[index] = -2;
-                printf( "Breakpoint %d deleted\n", index );
+                if( index >= 0 )
+                    // insert function name index in next free spot
+                    for( int i = 0; i < 512; ++i )
+                        if( -1 == break_functions[i] || -2 == break_functions[i] ) {
+                            break_functions[i] = index;
+                            printf( "Breakpoint %d, %s()\n", i, param );
+                            break;
+                        }
+            }
+
+            // check for breakpoint deletion demand
+            else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
+                int index = atoi( param );
+                if( index >= 512  || ( !index && strcmp( param, "0" ) ) || -1 == break_functions[index] ) {
+                    printf( "Breakpoint %s does not exist\n", param );
+                } else {
+                    break_functions[index] = -2;
+                    printf( "Breakpoint %d deleted\n", index );
+                }
+            }
+        
+        // no parameters, simple commands
+        } else {
+            // continue program execution
+            if( !strcmp( cmd, "c" ) || !strcmp( cmd, "continue" ) )
+                break;
+
+            // check for breakpoints listing
+            else if( !strcmp( cmd, "l" ) || !strcmp( cmd, "list" ) ) {
+                for( int i = 0; i < 512; ++i ) {
+                    if( -1 == break_functions[i] ) break;
+                    if( -2 == break_functions[i] ) continue;
+                    printf( "Breakpoint %d on function %s()\n", i, gl_functions[break_functions[i]] );
+                }
+            }
+
+            // check for ALL breakpoints deletion
+            else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
+                // get confirmation
+                char str[4];
+                char c;
+
+                while( 1 ) {
+                    printf( "Delete all breakpoints? (y or n) " );
+                    gets( str );
+                    sscanf( str, "%c", &c );
+
+                    if( 'n' == c )
+                        break;
+                    if( 'y' == c ) {
+                        for( int i = 0; i < 512; ++i ) {
+                            if( -1 == break_functions[i] ) break;
+                            break_functions[i] = -1;
+                        }
+                        break;
+                    }
+                }
             }
         }
 
-        // check for breakpoints listing
-        else if( !strcmp( cmd, "l" ) || !strcmp( cmd, "list" ) ) {
-            for( int i = 0; i < 512; ++i ) {
-                if( -1 == break_functions[i] ) break;
-                if( -2 == break_functions[i] ) continue;
-                printf( "Breakpoint %d on function %s()\n", i, gl_functions[break_functions[i]] );
-            }
-        }
+
 
         param = pline = NULL; 
     }
@@ -1334,3920 +1361,6160 @@ static void LoadProcs() {
 void gldlCullFace ( GLenum mode, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCullFace( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glCullFace", 73, file, line );
-    gldlCullFace_impl( mode );
+    int breakpoint = DebugTest( 73 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCullFace( mode=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlCullFace_impl( mode );
 }
 
 void gldlFrontFace ( GLenum mode, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFrontFace( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glFrontFace", 136, file, line );
-    gldlFrontFace_impl( mode );
+    int breakpoint = DebugTest( 136 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFrontFace( mode=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlFrontFace_impl( mode );
 }
 
 void gldlHint ( GLenum target, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glHint( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glHint", 252, file, line );
-    gldlHint_impl( target, mode );
+    int breakpoint = DebugTest( 252 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glHint( target=%s, mode=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlHint_impl( target, mode );
 }
 
 void gldlLineWidth ( GLfloat width, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glLineWidth( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glLineWidth", 268, file, line );
-    gldlLineWidth_impl( width );
+    int breakpoint = DebugTest( 268 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glLineWidth( width=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlLineWidth_impl( width );
 }
 
 void gldlPointSize ( GLfloat size, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPointSize( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glPointSize", 299, file, line );
-    gldlPointSize_impl( size );
+    int breakpoint = DebugTest( 299 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPointSize( size=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlPointSize_impl( size );
 }
 
 void gldlPolygonMode ( GLenum face, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPolygonMode( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPolygonMode", 300, file, line );
-    gldlPolygonMode_impl( face, mode );
+    int breakpoint = DebugTest( 300 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPolygonMode( face=%s, mode=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPolygonMode_impl( face, mode );
 }
 
 void gldlScissor ( GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glScissor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glScissor", 372, file, line );
-    gldlScissor_impl( x, y, width, height );
+    int breakpoint = DebugTest( 372 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glScissor( x=%s, y=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlScissor_impl( x, y, width, height );
 }
 
 void gldlTexParameterf ( GLenum target, GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameterf( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glTexParameterf", 402, file, line );
-    gldlTexParameterf_impl( target, pname, param );
+    int breakpoint = DebugTest( 402 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexParameterf( target=%s, pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlTexParameterf_impl( target, pname, param );
 }
 
 void gldlTexParameterfv ( GLenum target, GLenum pname, const GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glTexParameterfv", 403, file, line );
-    gldlTexParameterfv_impl( target, pname, params );
+    int breakpoint = DebugTest( 403 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexParameterfv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlTexParameterfv_impl( target, pname, params );
 }
 
 void gldlTexParameteri ( GLenum target, GLenum pname, GLint param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glTexParameteri", 404, file, line );
-    gldlTexParameteri_impl( target, pname, param );
+    int breakpoint = DebugTest( 404 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexParameteri( target=%s, pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlTexParameteri_impl( target, pname, param );
 }
 
 void gldlTexParameteriv ( GLenum target, GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glTexParameteriv", 405, file, line );
-    gldlTexParameteriv_impl( target, pname, params );
+    int breakpoint = DebugTest( 405 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexParameteriv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlTexParameteriv_impl( target, pname, params );
 }
 
 void gldlTexImage1D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexImage1D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
-    DebugTest( "glTexImage1D", 395, file, line );
-    gldlTexImage1D_impl( target, level, internalformat, width, border, format, type, pixels );
+    int breakpoint = DebugTest( 395 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexImage1D( target=%s, level=%s, internalformat=%s, width=%s, border=%s, format=%s, type=%s, pixels=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, file, line );
+		DebugFunction();
+	}
+	gldlTexImage1D_impl( target, level, internalformat, width, border, format, type, pixels );
 }
 
 void gldlTexImage2D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
-    DebugTest( "glTexImage2D", 396, file, line );
-    gldlTexImage2D_impl( target, level, internalformat, width, height, border, format, type, pixels );
+    int breakpoint = DebugTest( 396 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexImage2D( target=%s, level=%s, internalformat=%s, width=%s, height=%s, border=%s, format=%s, type=%s, pixels=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, file, line );
+		DebugFunction();
+	}
+	gldlTexImage2D_impl( target, level, internalformat, width, height, border, format, type, pixels );
 }
 
 void gldlDrawBuffer ( GLenum mode, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawBuffer( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glDrawBuffer", 104, file, line );
-    gldlDrawBuffer_impl( mode );
+    int breakpoint = DebugTest( 104 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawBuffer( mode=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlDrawBuffer_impl( mode );
 }
 
 void gldlClear ( GLbitfield mask, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClear( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glClear", 39, file, line );
-    gldlClear_impl( mask );
+    int breakpoint = DebugTest( 39 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClear( mask=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlClear_impl( mask );
 }
 
 void gldlClearColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearColor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glClearColor", 44, file, line );
-    gldlClearColor_impl( red, green, blue, alpha );
+    int breakpoint = DebugTest( 44 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClearColor( red=%s, green=%s, blue=%s, alpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlClearColor_impl( red, green, blue, alpha );
 }
 
 void gldlClearStencil ( GLint s, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearStencil( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glClearStencil", 47, file, line );
-    gldlClearStencil_impl( s );
+    int breakpoint = DebugTest( 47 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClearStencil( s=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlClearStencil_impl( s );
 }
 
 void gldlClearDepth ( GLclampd depth, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearDepth( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glClearDepth", 45, file, line );
-    gldlClearDepth_impl( depth );
+    int breakpoint = DebugTest( 45 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClearDepth( depth=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlClearDepth_impl( depth );
 }
 
 void gldlStencilMask ( GLuint mask, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glStencilMask( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glStencilMask", 382, file, line );
-    gldlStencilMask_impl( mask );
+    int breakpoint = DebugTest( 382 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glStencilMask( mask=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlStencilMask_impl( mask );
 }
 
 void gldlColorMask ( GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glColorMask( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glColorMask", 49, file, line );
-    gldlColorMask_impl( red, green, blue, alpha );
+    int breakpoint = DebugTest( 49 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glColorMask( red=%s, green=%s, blue=%s, alpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlColorMask_impl( red, green, blue, alpha );
 }
 
 void gldlDepthMask ( GLboolean flag, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDepthMask( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glDepthMask", 91, file, line );
-    gldlDepthMask_impl( flag );
+    int breakpoint = DebugTest( 91 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDepthMask( flag=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlDepthMask_impl( flag );
 }
 
 void gldlDisable ( GLenum cap, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDisable( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glDisable", 97, file, line );
-    gldlDisable_impl( cap );
+    int breakpoint = DebugTest( 97 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDisable( cap=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlDisable_impl( cap );
 }
 
 void gldlEnable ( GLenum cap, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEnable( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glEnable", 119, file, line );
-    gldlEnable_impl( cap );
+    int breakpoint = DebugTest( 119 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glEnable( cap=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlEnable_impl( cap );
 }
 
 void gldlFinish ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFinish();\n", file, line );
 
-    DebugTest( "glFinish", 127, file, line );
-    gldlFinish_impl(  );
+    int breakpoint = DebugTest( 127 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFinish( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	gldlFinish_impl(  );
 }
 
 void gldlFlush ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFlush();\n", file, line );
 
-    DebugTest( "glFlush", 128, file, line );
-    gldlFlush_impl(  );
+    int breakpoint = DebugTest( 128 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFlush( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	gldlFlush_impl(  );
 }
 
 void gldlBlendFunc ( GLenum sfactor, GLenum dfactor, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendFunc( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBlendFunc", 28, file, line );
-    gldlBlendFunc_impl( sfactor, dfactor );
+    int breakpoint = DebugTest( 28 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendFunc( sfactor=%s, dfactor=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBlendFunc_impl( sfactor, dfactor );
 }
 
 void gldlLogicOp ( GLenum opcode, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glLogicOp( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glLogicOp", 270, file, line );
-    gldlLogicOp_impl( opcode );
+    int breakpoint = DebugTest( 270 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glLogicOp( opcode=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlLogicOp_impl( opcode );
 }
 
 void gldlStencilFunc ( GLenum func, GLint ref, GLuint mask, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glStencilFunc( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glStencilFunc", 380, file, line );
-    gldlStencilFunc_impl( func, ref, mask );
+    int breakpoint = DebugTest( 380 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glStencilFunc( func=%s, ref=%s, mask=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlStencilFunc_impl( func, ref, mask );
 }
 
 void gldlStencilOp ( GLenum fail, GLenum zfail, GLenum zpass, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glStencilOp( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glStencilOp", 384, file, line );
-    gldlStencilOp_impl( fail, zfail, zpass );
+    int breakpoint = DebugTest( 384 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glStencilOp( fail=%s, zfail=%s, zpass=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlStencilOp_impl( fail, zfail, zpass );
 }
 
 void gldlDepthFunc ( GLenum func, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDepthFunc( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glDepthFunc", 90, file, line );
-    gldlDepthFunc_impl( func );
+    int breakpoint = DebugTest( 90 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDepthFunc( func=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlDepthFunc_impl( func );
 }
 
 void gldlPixelStoref ( GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPixelStoref( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPixelStoref", 293, file, line );
-    gldlPixelStoref_impl( pname, param );
+    int breakpoint = DebugTest( 293 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPixelStoref( pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPixelStoref_impl( pname, param );
 }
 
 void gldlPixelStorei ( GLenum pname, GLint param, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPixelStorei( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPixelStorei", 294, file, line );
-    gldlPixelStorei_impl( pname, param );
+    int breakpoint = DebugTest( 294 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPixelStorei( pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPixelStorei_impl( pname, param );
 }
 
 void gldlReadBuffer ( GLenum mode, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glReadBuffer( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glReadBuffer", 357, file, line );
-    gldlReadBuffer_impl( mode );
+    int breakpoint = DebugTest( 357 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glReadBuffer( mode=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlReadBuffer_impl( mode );
 }
 
 void gldlReadPixels ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glReadPixels( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glReadPixels", 358, file, line );
-    gldlReadPixels_impl( x, y, width, height, format, type, pixels );
+    int breakpoint = DebugTest( 358 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glReadPixels( x=%s, y=%s, width=%s, height=%s, format=%s, type=%s, pixels=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlReadPixels_impl( x, y, width, height, format, type, pixels );
 }
 
 void gldlGetBooleanv ( GLenum pname, GLboolean *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBooleanv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetBooleanv", 160, file, line );
-    gldlGetBooleanv_impl( pname, params );
+    int breakpoint = DebugTest( 160 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetBooleanv( pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGetBooleanv_impl( pname, params );
 }
 
 void gldlGetDoublev ( GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetDoublev( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetDoublev", 168, file, line );
-    gldlGetDoublev_impl( pname, params );
+    int breakpoint = DebugTest( 168 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetDoublev( pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGetDoublev_impl( pname, params );
 }
 
 GLenum gldlGetError ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetError();\n", file, line );
 
-    DebugTest( "glGetError", 169, file, line );
-    return gldlGetError_impl(  );
+    int breakpoint = DebugTest( 169 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetError( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	return gldlGetError_impl(  );
 }
 
 void gldlGetFloatv ( GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFloatv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetFloatv", 171, file, line );
-    gldlGetFloatv_impl( pname, params );
+    int breakpoint = DebugTest( 171 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetFloatv( pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGetFloatv_impl( pname, params );
 }
 
 void gldlGetIntegerv ( GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetIntegerv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetIntegerv", 179, file, line );
-    gldlGetIntegerv_impl( pname, params );
+    int breakpoint = DebugTest( 179 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetIntegerv( pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGetIntegerv_impl( pname, params );
 }
 
 const GLubyte * gldlGetString ( GLenum name, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetString( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glGetString", 206, file, line );
-    return gldlGetString_impl( name );
+    int breakpoint = DebugTest( 206 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetString( name=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlGetString_impl( name );
 }
 
 void gldlGetTexImage ( GLenum target, GLint level, GLenum format, GLenum type, GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexImage( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetTexImage", 211, file, line );
-    gldlGetTexImage_impl( target, level, format, type, pixels );
+    int breakpoint = DebugTest( 211 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetTexImage( target=%s, level=%s, format=%s, type=%s, pixels=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetTexImage_impl( target, level, format, type, pixels );
 }
 
 void gldlGetTexParameterfv ( GLenum target, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetTexParameterfv", 216, file, line );
-    gldlGetTexParameterfv_impl( target, pname, params );
+    int breakpoint = DebugTest( 216 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetTexParameterfv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetTexParameterfv_impl( target, pname, params );
 }
 
 void gldlGetTexParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetTexParameteriv", 217, file, line );
-    gldlGetTexParameteriv_impl( target, pname, params );
+    int breakpoint = DebugTest( 217 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetTexParameteriv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetTexParameteriv_impl( target, pname, params );
 }
 
 void gldlGetTexLevelParameterfv ( GLenum target, GLint level, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexLevelParameterfv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetTexLevelParameterfv", 212, file, line );
-    gldlGetTexLevelParameterfv_impl( target, level, pname, params );
+    int breakpoint = DebugTest( 212 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetTexLevelParameterfv( target=%s, level=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetTexLevelParameterfv_impl( target, level, pname, params );
 }
 
 void gldlGetTexLevelParameteriv ( GLenum target, GLint level, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexLevelParameteriv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetTexLevelParameteriv", 213, file, line );
-    gldlGetTexLevelParameteriv_impl( target, level, pname, params );
+    int breakpoint = DebugTest( 213 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetTexLevelParameteriv( target=%s, level=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetTexLevelParameteriv_impl( target, level, pname, params );
 }
 
 GLboolean gldlIsEnabled ( GLenum cap, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsEnabled( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsEnabled", 254, file, line );
-    return gldlIsEnabled_impl( cap );
+    int breakpoint = DebugTest( 254 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsEnabled( cap=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsEnabled_impl( cap );
 }
 
 void gldlDepthRange ( GLclampd near, GLclampd far, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDepthRange( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDepthRange", 92, file, line );
-    gldlDepthRange_impl( near, far );
+    int breakpoint = DebugTest( 92 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDepthRange( near=%s, far=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDepthRange_impl( near, far );
 }
 
 void gldlViewport ( GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glViewport( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glViewport", 555, file, line );
-    gldlViewport_impl( x, y, width, height );
+    int breakpoint = DebugTest( 555 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glViewport( x=%s, y=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlViewport_impl( x, y, width, height );
 }
 
 void gldlDrawArrays ( GLenum mode, GLint first, GLsizei count, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawArrays( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glDrawArrays", 100, file, line );
-    gldlDrawArrays_impl( mode, first, count );
+    int breakpoint = DebugTest( 100 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawArrays( mode=%s, first=%s, count=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlDrawArrays_impl( mode, first, count );
 }
 
 void gldlDrawElements ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElements( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glDrawElements", 106, file, line );
-    gldlDrawElements_impl( mode, count, type, indices );
+    int breakpoint = DebugTest( 106 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawElements( mode=%s, count=%s, type=%s, indices=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlDrawElements_impl( mode, count, type, indices );
 }
 
 void gldlGetPointerv ( GLenum pname, GLvoid* *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetPointerv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetPointerv", 184, file, line );
-    gldlGetPointerv_impl( pname, params );
+    int breakpoint = DebugTest( 184 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetPointerv( pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGetPointerv_impl( pname, params );
 }
 
 void gldlPolygonOffset ( GLfloat factor, GLfloat units, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPolygonOffset( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPolygonOffset", 301, file, line );
-    gldlPolygonOffset_impl( factor, units );
+    int breakpoint = DebugTest( 301 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPolygonOffset( factor=%s, units=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPolygonOffset_impl( factor, units );
 }
 
 void gldlCopyTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLint border, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCopyTexImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glCopyTexImage1D", 64, file, line );
-    gldlCopyTexImage1D_impl( target, level, internalformat, x, y, width, border );
+    int breakpoint = DebugTest( 64 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCopyTexImage1D( target=%s, level=%s, internalformat=%s, x=%s, y=%s, width=%s, border=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlCopyTexImage1D_impl( target, level, internalformat, x, y, width, border );
 }
 
 void gldlCopyTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCopyTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
-    DebugTest( "glCopyTexImage2D", 65, file, line );
-    gldlCopyTexImage2D_impl( target, level, internalformat, x, y, width, height, border );
+    int breakpoint = DebugTest( 65 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCopyTexImage2D( target=%s, level=%s, internalformat=%s, x=%s, y=%s, width=%s, height=%s, border=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, file, line );
+		DebugFunction();
+	}
+	gldlCopyTexImage2D_impl( target, level, internalformat, x, y, width, height, border );
 }
 
 void gldlCopyTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLint x, GLint y, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCopyTexSubImage1D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glCopyTexSubImage1D", 66, file, line );
-    gldlCopyTexSubImage1D_impl( target, level, xoffset, x, y, width );
+    int breakpoint = DebugTest( 66 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCopyTexSubImage1D( target=%s, level=%s, xoffset=%s, x=%s, y=%s, width=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlCopyTexSubImage1D_impl( target, level, xoffset, x, y, width );
 }
 
 void gldlCopyTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCopyTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
-    DebugTest( "glCopyTexSubImage2D", 67, file, line );
-    gldlCopyTexSubImage2D_impl( target, level, xoffset, yoffset, x, y, width, height );
+    int breakpoint = DebugTest( 67 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCopyTexSubImage2D( target=%s, level=%s, xoffset=%s, yoffset=%s, x=%s, y=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, file, line );
+		DebugFunction();
+	}
+	gldlCopyTexSubImage2D_impl( target, level, xoffset, yoffset, x, y, width, height );
 }
 
 void gldlTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexSubImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glTexSubImage1D", 409, file, line );
-    gldlTexSubImage1D_impl( target, level, xoffset, width, format, type, pixels );
+    int breakpoint = DebugTest( 409 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexSubImage1D( target=%s, level=%s, xoffset=%s, width=%s, format=%s, type=%s, pixels=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlTexSubImage1D_impl( target, level, xoffset, width, format, type, pixels );
 }
 
 void gldlTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
-    DebugTest( "glTexSubImage2D", 410, file, line );
-    gldlTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, type, pixels );
+    int breakpoint = DebugTest( 410 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexSubImage2D( target=%s, level=%s, xoffset=%s, yoffset=%s, width=%s, height=%s, format=%s, type=%s, pixels=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, file, line );
+		DebugFunction();
+	}
+	gldlTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, type, pixels );
 }
 
 void gldlBindTexture ( GLenum target, GLuint texture, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindTexture( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBindTexture", 18, file, line );
-    gldlBindTexture_impl( target, texture );
+    int breakpoint = DebugTest( 18 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindTexture( target=%s, texture=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBindTexture_impl( target, texture );
 }
 
 void gldlDeleteTextures ( GLsizei n, const GLuint *textures, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteTextures( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteTextures", 87, file, line );
-    gldlDeleteTextures_impl( n, textures );
+    int breakpoint = DebugTest( 87 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteTextures( n=%s, textures=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteTextures_impl( n, textures );
 }
 
 void gldlGenTextures ( GLsizei n, GLuint *textures, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenTextures( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenTextures", 143, file, line );
-    gldlGenTextures_impl( n, textures );
+    int breakpoint = DebugTest( 143 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenTextures( n=%s, textures=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenTextures_impl( n, textures );
 }
 
 GLboolean gldlIsTexture ( GLuint texture, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsTexture( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsTexture", 265, file, line );
-    return gldlIsTexture_impl( texture );
+    int breakpoint = DebugTest( 265 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsTexture( texture=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsTexture_impl( texture );
 }
 
 void gldlBlendColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendColor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glBlendColor", 21, file, line );
-    gldlBlendColor_impl( red, green, blue, alpha );
+    int breakpoint = DebugTest( 21 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendColor( red=%s, green=%s, blue=%s, alpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlBlendColor_impl( red, green, blue, alpha );
 }
 
 void gldlBlendEquation ( GLenum mode, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendEquation( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glBlendEquation", 22, file, line );
-    gldlBlendEquation_impl( mode );
+    int breakpoint = DebugTest( 22 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendEquation( mode=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlBlendEquation_impl( mode );
 }
 
 void gldlDrawRangeElements ( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawRangeElements( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glDrawRangeElements", 113, file, line );
-    gldlDrawRangeElements_impl( mode, start, end, count, type, indices );
+    int breakpoint = DebugTest( 113 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawRangeElements( mode=%s, start=%s, end=%s, count=%s, type=%s, indices=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlDrawRangeElements_impl( mode, start, end, count, type, indices );
 }
 
 void gldlTexImage3D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,  arg9 );
 
-    DebugTest( "glTexImage3D", 398, file, line );
-    gldlTexImage3D_impl( target, level, internalformat, width, height, depth, border, format, type, pixels );
+    int breakpoint = DebugTest( 398 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexImage3D( target=%s, level=%s, internalformat=%s, width=%s, height=%s, depth=%s, border=%s, format=%s, type=%s, pixels=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, file, line );
+		DebugFunction();
+	}
+	gldlTexImage3D_impl( target, level, internalformat, width, height, depth, border, format, type, pixels );
 }
 
 void gldlTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *arg10, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9,  arg10 );
 
-    DebugTest( "glTexSubImage3D", 411, file, line );
-    gldlTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels );
+    int breakpoint = DebugTest( 411 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexSubImage3D( target=%s, level=%s, xoffset=%s, yoffset=%s, zoffset=%s, width=%s, height=%s, depth=%s, format=%s, type=%s, pixels=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, file, line );
+		DebugFunction();
+	}
+	gldlTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels );
 }
 
 void gldlCopyTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCopyTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
-    DebugTest( "glCopyTexSubImage3D", 68, file, line );
-    gldlCopyTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, x, y, width, height );
+    int breakpoint = DebugTest( 68 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCopyTexSubImage3D( target=%s, level=%s, xoffset=%s, yoffset=%s, zoffset=%s, x=%s, y=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, file, line );
+		DebugFunction();
+	}
+	gldlCopyTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, x, y, width, height );
 }
 
 void gldlActiveTexture ( GLenum texture, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glActiveTexture( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glActiveTexture", 1, file, line );
-    gldlActiveTexture_impl( texture );
+    int breakpoint = DebugTest( 1 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glActiveTexture( texture=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlActiveTexture_impl( texture );
 }
 
 void gldlSampleCoverage ( GLclampf value, GLboolean invert, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSampleCoverage( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glSampleCoverage", 364, file, line );
-    gldlSampleCoverage_impl( value, invert );
+    int breakpoint = DebugTest( 364 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSampleCoverage( value=%s, invert=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlSampleCoverage_impl( value, invert );
 }
 
 void gldlCompressedTexImage3D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
-    DebugTest( "glCompressedTexImage3D", 59, file, line );
-    gldlCompressedTexImage3D_impl( target, level, internalformat, width, height, depth, border, imageSize, data );
+    int breakpoint = DebugTest( 59 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCompressedTexImage3D( target=%s, level=%s, internalformat=%s, width=%s, height=%s, depth=%s, border=%s, imageSize=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, file, line );
+		DebugFunction();
+	}
+	gldlCompressedTexImage3D_impl( target, level, internalformat, width, height, depth, border, imageSize, data );
 }
 
 void gldlCompressedTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
-    DebugTest( "glCompressedTexImage2D", 58, file, line );
-    gldlCompressedTexImage2D_impl( target, level, internalformat, width, height, border, imageSize, data );
+    int breakpoint = DebugTest( 58 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCompressedTexImage2D( target=%s, level=%s, internalformat=%s, width=%s, height=%s, border=%s, imageSize=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, file, line );
+		DebugFunction();
+	}
+	gldlCompressedTexImage2D_impl( target, level, internalformat, width, height, border, imageSize, data );
 }
 
 void gldlCompressedTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glCompressedTexImage1D", 57, file, line );
-    gldlCompressedTexImage1D_impl( target, level, internalformat, width, border, imageSize, data );
+    int breakpoint = DebugTest( 57 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCompressedTexImage1D( target=%s, level=%s, internalformat=%s, width=%s, border=%s, imageSize=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlCompressedTexImage1D_impl( target, level, internalformat, width, border, imageSize, data );
 }
 
 void gldlCompressedTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *arg10, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9,  arg10 );
 
-    DebugTest( "glCompressedTexSubImage3D", 62, file, line );
-    gldlCompressedTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data );
+    int breakpoint = DebugTest( 62 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCompressedTexSubImage3D( target=%s, level=%s, xoffset=%s, yoffset=%s, zoffset=%s, width=%s, height=%s, depth=%s, format=%s, imageSize=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, file, line );
+		DebugFunction();
+	}
+	gldlCompressedTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data );
 }
 
 void gldlCompressedTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
-    DebugTest( "glCompressedTexSubImage2D", 61, file, line );
-    gldlCompressedTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, imageSize, data );
+    int breakpoint = DebugTest( 61 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCompressedTexSubImage2D( target=%s, level=%s, xoffset=%s, yoffset=%s, width=%s, height=%s, format=%s, imageSize=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, file, line );
+		DebugFunction();
+	}
+	gldlCompressedTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, imageSize, data );
 }
 
 void gldlCompressedTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glCompressedTexSubImage1D", 60, file, line );
-    gldlCompressedTexSubImage1D_impl( target, level, xoffset, width, format, imageSize, data );
+    int breakpoint = DebugTest( 60 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCompressedTexSubImage1D( target=%s, level=%s, xoffset=%s, width=%s, format=%s, imageSize=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlCompressedTexSubImage1D_impl( target, level, xoffset, width, format, imageSize, data );
 }
 
 void gldlGetCompressedTexImage ( GLenum target, GLint level, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetCompressedTexImage( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetCompressedTexImage", 165, file, line );
-    gldlGetCompressedTexImage_impl( target, level, img );
+    int breakpoint = DebugTest( 165 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetCompressedTexImage( target=%s, level=%s, img=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetCompressedTexImage_impl( target, level, img );
 }
 
 void gldlBlendFuncSeparate ( GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendFuncSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glBlendFuncSeparate", 29, file, line );
-    gldlBlendFuncSeparate_impl( sfactorRGB, dfactorRGB, sfactorAlpha, dfactorAlpha );
+    int breakpoint = DebugTest( 29 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendFuncSeparate( sfactorRGB=%s, dfactorRGB=%s, sfactorAlpha=%s, dfactorAlpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlBlendFuncSeparate_impl( sfactorRGB, dfactorRGB, sfactorAlpha, dfactorAlpha );
 }
 
 void gldlMultiDrawArrays ( GLenum mode, const GLint *first, const GLsizei *count, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiDrawArrays( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glMultiDrawArrays", 276, file, line );
-    gldlMultiDrawArrays_impl( mode, first, count, primcount );
+    int breakpoint = DebugTest( 276 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiDrawArrays( mode=%s, first=%s, count=%s, primcount=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlMultiDrawArrays_impl( mode, first, count, primcount );
 }
 
 void gldlMultiDrawElements ( GLenum mode, const GLsizei *count, GLenum type, const GLvoid* *indices, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiDrawElements( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glMultiDrawElements", 277, file, line );
-    gldlMultiDrawElements_impl( mode, count, type, indices, primcount );
+    int breakpoint = DebugTest( 277 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiDrawElements( mode=%s, count=%s, type=%s, indices=%s, primcount=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlMultiDrawElements_impl( mode, count, type, indices, primcount );
 }
 
 void gldlPointParameterf ( GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPointParameterf( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPointParameterf", 295, file, line );
-    gldlPointParameterf_impl( pname, param );
+    int breakpoint = DebugTest( 295 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPointParameterf( pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPointParameterf_impl( pname, param );
 }
 
 void gldlPointParameterfv ( GLenum pname, const GLfloat *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPointParameterfv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPointParameterfv", 296, file, line );
-    gldlPointParameterfv_impl( pname, params );
+    int breakpoint = DebugTest( 296 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPointParameterfv( pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPointParameterfv_impl( pname, params );
 }
 
 void gldlPointParameteri ( GLenum pname, GLint param, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPointParameteri( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPointParameteri", 297, file, line );
-    gldlPointParameteri_impl( pname, param );
+    int breakpoint = DebugTest( 297 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPointParameteri( pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPointParameteri_impl( pname, param );
 }
 
 void gldlPointParameteriv ( GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPointParameteriv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPointParameteriv", 298, file, line );
-    gldlPointParameteriv_impl( pname, params );
+    int breakpoint = DebugTest( 298 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPointParameteriv( pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPointParameteriv_impl( pname, params );
 }
 
 void gldlGenQueries ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenQueries( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenQueries", 140, file, line );
-    gldlGenQueries_impl( n, ids );
+    int breakpoint = DebugTest( 140 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenQueries( n=%s, ids=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenQueries_impl( n, ids );
 }
 
 void gldlDeleteQueries ( GLsizei n, const GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteQueries( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteQueries", 82, file, line );
-    gldlDeleteQueries_impl( n, ids );
+    int breakpoint = DebugTest( 82 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteQueries( n=%s, ids=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteQueries_impl( n, ids );
 }
 
 GLboolean gldlIsQuery ( GLuint id, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsQuery( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsQuery", 260, file, line );
-    return gldlIsQuery_impl( id );
+    int breakpoint = DebugTest( 260 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsQuery( id=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsQuery_impl( id );
 }
 
 void gldlBeginQuery ( GLenum target, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBeginQuery( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBeginQuery", 4, file, line );
-    gldlBeginQuery_impl( target, id );
+    int breakpoint = DebugTest( 4 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBeginQuery( target=%s, id=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBeginQuery_impl( target, id );
 }
 
 void gldlEndQuery ( GLenum target, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEndQuery( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glEndQuery", 123, file, line );
-    gldlEndQuery_impl( target );
+    int breakpoint = DebugTest( 123 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glEndQuery( target=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlEndQuery_impl( target );
 }
 
 void gldlGetQueryiv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetQueryiv", 196, file, line );
-    gldlGetQueryiv_impl( target, pname, params );
+    int breakpoint = DebugTest( 196 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetQueryiv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetQueryiv_impl( target, pname, params );
 }
 
 void gldlGetQueryObjectiv ( GLuint id, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryObjectiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetQueryObjectiv", 193, file, line );
-    gldlGetQueryObjectiv_impl( id, pname, params );
+    int breakpoint = DebugTest( 193 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetQueryObjectiv( id=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetQueryObjectiv_impl( id, pname, params );
 }
 
 void gldlGetQueryObjectuiv ( GLuint id, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryObjectuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetQueryObjectuiv", 195, file, line );
-    gldlGetQueryObjectuiv_impl( id, pname, params );
+    int breakpoint = DebugTest( 195 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetQueryObjectuiv( id=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetQueryObjectuiv_impl( id, pname, params );
 }
 
 void gldlBindBuffer ( GLenum target, GLuint buffer, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindBuffer( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBindBuffer", 8, file, line );
-    gldlBindBuffer_impl( target, buffer );
+    int breakpoint = DebugTest( 8 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindBuffer( target=%s, buffer=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBindBuffer_impl( target, buffer );
 }
 
 void gldlDeleteBuffers ( GLsizei n, const GLuint *buffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteBuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteBuffers", 77, file, line );
-    gldlDeleteBuffers_impl( n, buffers );
+    int breakpoint = DebugTest( 77 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteBuffers( n=%s, buffers=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteBuffers_impl( n, buffers );
 }
 
 void gldlGenBuffers ( GLsizei n, GLuint *buffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenBuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenBuffers", 137, file, line );
-    gldlGenBuffers_impl( n, buffers );
+    int breakpoint = DebugTest( 137 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenBuffers( n=%s, buffers=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenBuffers_impl( n, buffers );
 }
 
 GLboolean gldlIsBuffer ( GLuint buffer, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsBuffer( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsBuffer", 253, file, line );
-    return gldlIsBuffer_impl( buffer );
+    int breakpoint = DebugTest( 253 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsBuffer( buffer=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsBuffer_impl( buffer );
 }
 
 void gldlBufferData ( GLenum target, GLsizeiptr size, const GLvoid *data, GLenum usage, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBufferData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glBufferData", 35, file, line );
-    gldlBufferData_impl( target, size, data, usage );
+    int breakpoint = DebugTest( 35 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBufferData( target=%s, size=%s, data=%s, usage=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlBufferData_impl( target, size, data, usage );
 }
 
 void gldlBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBufferSubData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glBufferSubData", 36, file, line );
-    gldlBufferSubData_impl( target, offset, size, data );
+    int breakpoint = DebugTest( 36 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBufferSubData( target=%s, offset=%s, size=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlBufferSubData_impl( target, offset, size, data );
 }
 
 void gldlGetBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBufferSubData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetBufferSubData", 164, file, line );
-    gldlGetBufferSubData_impl( target, offset, size, data );
+    int breakpoint = DebugTest( 164 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetBufferSubData( target=%s, offset=%s, size=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetBufferSubData_impl( target, offset, size, data );
 }
 
 GLvoid* gldlMapBuffer ( GLenum target, GLenum access, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMapBuffer( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glMapBuffer", 271, file, line );
-    return gldlMapBuffer_impl( target, access );
+    int breakpoint = DebugTest( 271 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMapBuffer( target=%s, access=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlMapBuffer_impl( target, access );
 }
 
 GLboolean gldlUnmapBuffer ( GLenum target, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUnmapBuffer( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glUnmapBuffer", 468, file, line );
-    return gldlUnmapBuffer_impl( target );
+    int breakpoint = DebugTest( 468 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUnmapBuffer( target=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlUnmapBuffer_impl( target );
 }
 
 void gldlGetBufferParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBufferParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetBufferParameteriv", 162, file, line );
-    gldlGetBufferParameteriv_impl( target, pname, params );
+    int breakpoint = DebugTest( 162 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetBufferParameteriv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetBufferParameteriv_impl( target, pname, params );
 }
 
 void gldlGetBufferPointerv ( GLenum target, GLenum pname, GLvoid* *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBufferPointerv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetBufferPointerv", 163, file, line );
-    gldlGetBufferPointerv_impl( target, pname, params );
+    int breakpoint = DebugTest( 163 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetBufferPointerv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetBufferPointerv_impl( target, pname, params );
 }
 
 void gldlBlendEquationSeparate ( GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendEquationSeparate( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBlendEquationSeparate", 23, file, line );
-    gldlBlendEquationSeparate_impl( modeRGB, modeAlpha );
+    int breakpoint = DebugTest( 23 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendEquationSeparate( modeRGB=%s, modeAlpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBlendEquationSeparate_impl( modeRGB, modeAlpha );
 }
 
 void gldlDrawBuffers ( GLsizei n, const GLenum *bufs, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawBuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDrawBuffers", 105, file, line );
-    gldlDrawBuffers_impl( n, bufs );
+    int breakpoint = DebugTest( 105 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawBuffers( n=%s, bufs=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDrawBuffers_impl( n, bufs );
 }
 
 void gldlStencilOpSeparate ( GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glStencilOpSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glStencilOpSeparate", 385, file, line );
-    gldlStencilOpSeparate_impl( face, sfail, dpfail, dppass );
+    int breakpoint = DebugTest( 385 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glStencilOpSeparate( face=%s, sfail=%s, dpfail=%s, dppass=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlStencilOpSeparate_impl( face, sfail, dpfail, dppass );
 }
 
 void gldlStencilFuncSeparate ( GLenum face, GLenum func, GLint ref, GLuint mask, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glStencilFuncSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glStencilFuncSeparate", 381, file, line );
-    gldlStencilFuncSeparate_impl( face, func, ref, mask );
+    int breakpoint = DebugTest( 381 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glStencilFuncSeparate( face=%s, func=%s, ref=%s, mask=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlStencilFuncSeparate_impl( face, func, ref, mask );
 }
 
 void gldlStencilMaskSeparate ( GLenum face, GLuint mask, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glStencilMaskSeparate( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glStencilMaskSeparate", 383, file, line );
-    gldlStencilMaskSeparate_impl( face, mask );
+    int breakpoint = DebugTest( 383 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glStencilMaskSeparate( face=%s, mask=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlStencilMaskSeparate_impl( face, mask );
 }
 
 void gldlAttachShader ( GLuint program, GLuint shader, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glAttachShader( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glAttachShader", 2, file, line );
-    gldlAttachShader_impl( program, shader );
+    int breakpoint = DebugTest( 2 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glAttachShader( program=%s, shader=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlAttachShader_impl( program, shader );
 }
 
 void gldlBindAttribLocation ( GLuint program, GLuint index, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindAttribLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glBindAttribLocation", 7, file, line );
-    gldlBindAttribLocation_impl( program, index, name );
+    int breakpoint = DebugTest( 7 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindAttribLocation( program=%s, index=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlBindAttribLocation_impl( program, index, name );
 }
 
 void gldlCompileShader ( GLuint shader, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompileShader( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glCompileShader", 55, file, line );
-    gldlCompileShader_impl( shader );
+    int breakpoint = DebugTest( 55 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCompileShader( shader=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlCompileShader_impl( shader );
 }
 
 GLuint gldlCreateProgram ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCreateProgram();\n", file, line );
 
-    DebugTest( "glCreateProgram", 69, file, line );
-    return gldlCreateProgram_impl(  );
+    int breakpoint = DebugTest( 69 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCreateProgram( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	return gldlCreateProgram_impl(  );
 }
 
 GLuint gldlCreateShader ( GLenum type, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCreateShader( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glCreateShader", 70, file, line );
-    return gldlCreateShader_impl( type );
+    int breakpoint = DebugTest( 70 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCreateShader( type=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlCreateShader_impl( type );
 }
 
 void gldlDeleteProgram ( GLuint program, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteProgram( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glDeleteProgram", 80, file, line );
-    gldlDeleteProgram_impl( program );
+    int breakpoint = DebugTest( 80 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteProgram( program=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlDeleteProgram_impl( program );
 }
 
 void gldlDeleteShader ( GLuint shader, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteShader( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glDeleteShader", 85, file, line );
-    gldlDeleteShader_impl( shader );
+    int breakpoint = DebugTest( 85 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteShader( shader=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlDeleteShader_impl( shader );
 }
 
 void gldlDetachShader ( GLuint program, GLuint shader, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDetachShader( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDetachShader", 96, file, line );
-    gldlDetachShader_impl( program, shader );
+    int breakpoint = DebugTest( 96 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDetachShader( program=%s, shader=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDetachShader_impl( program, shader );
 }
 
 void gldlDisableVertexAttribArray ( GLuint index, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDisableVertexAttribArray( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glDisableVertexAttribArray", 98, file, line );
-    gldlDisableVertexAttribArray_impl( index );
+    int breakpoint = DebugTest( 98 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDisableVertexAttribArray( index=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlDisableVertexAttribArray_impl( index );
 }
 
 void gldlEnableVertexAttribArray ( GLuint index, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEnableVertexAttribArray( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glEnableVertexAttribArray", 120, file, line );
-    gldlEnableVertexAttribArray_impl( index );
+    int breakpoint = DebugTest( 120 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glEnableVertexAttribArray( index=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlEnableVertexAttribArray_impl( index );
 }
 
 void gldlGetActiveAttrib ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveAttrib( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glGetActiveAttrib", 148, file, line );
-    gldlGetActiveAttrib_impl( program, index, bufSize, length, size, type, name );
+    int breakpoint = DebugTest( 148 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveAttrib( program=%s, index=%s, bufSize=%s, length=%s, size=%s, type=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveAttrib_impl( program, index, bufSize, length, size, type, name );
 }
 
 void gldlGetActiveUniform ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniform( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glGetActiveUniform", 152, file, line );
-    gldlGetActiveUniform_impl( program, index, bufSize, length, size, type, name );
+    int breakpoint = DebugTest( 152 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveUniform( program=%s, index=%s, bufSize=%s, length=%s, size=%s, type=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveUniform_impl( program, index, bufSize, length, size, type, name );
 }
 
 void gldlGetAttachedShaders ( GLuint program, GLsizei maxCount, GLsizei *count, GLuint *obj, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetAttachedShaders( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetAttachedShaders", 157, file, line );
-    gldlGetAttachedShaders_impl( program, maxCount, count, obj );
+    int breakpoint = DebugTest( 157 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetAttachedShaders( program=%s, maxCount=%s, count=%s, obj=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetAttachedShaders_impl( program, maxCount, count, obj );
 }
 
 GLint gldlGetAttribLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetAttribLocation( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetAttribLocation", 158, file, line );
-    return gldlGetAttribLocation_impl( program, name );
+    int breakpoint = DebugTest( 158 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetAttribLocation( program=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlGetAttribLocation_impl( program, name );
 }
 
 void gldlGetProgramiv ( GLuint program, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetProgramiv", 190, file, line );
-    gldlGetProgramiv_impl( program, pname, params );
+    int breakpoint = DebugTest( 190 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetProgramiv( program=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetProgramiv_impl( program, pname, params );
 }
 
 void gldlGetProgramInfoLog ( GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetProgramInfoLog", 186, file, line );
-    gldlGetProgramInfoLog_impl( program, bufSize, length, infoLog );
+    int breakpoint = DebugTest( 186 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetProgramInfoLog( program=%s, bufSize=%s, length=%s, infoLog=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetProgramInfoLog_impl( program, bufSize, length, infoLog );
 }
 
 void gldlGetShaderiv ( GLuint shader, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetShaderiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetShaderiv", 205, file, line );
-    gldlGetShaderiv_impl( shader, pname, params );
+    int breakpoint = DebugTest( 205 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetShaderiv( shader=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetShaderiv_impl( shader, pname, params );
 }
 
 void gldlGetShaderInfoLog ( GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetShaderInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetShaderInfoLog", 202, file, line );
-    gldlGetShaderInfoLog_impl( shader, bufSize, length, infoLog );
+    int breakpoint = DebugTest( 202 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetShaderInfoLog( shader=%s, bufSize=%s, length=%s, infoLog=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetShaderInfoLog_impl( shader, bufSize, length, infoLog );
 }
 
 void gldlGetShaderSource ( GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetShaderSource( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetShaderSource", 204, file, line );
-    gldlGetShaderSource_impl( shader, bufSize, length, source );
+    int breakpoint = DebugTest( 204 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetShaderSource( shader=%s, bufSize=%s, length=%s, source=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetShaderSource_impl( shader, bufSize, length, source );
 }
 
 GLint gldlGetUniformLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformLocation( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetUniformLocation", 221, file, line );
-    return gldlGetUniformLocation_impl( program, name );
+    int breakpoint = DebugTest( 221 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetUniformLocation( program=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlGetUniformLocation_impl( program, name );
 }
 
 void gldlGetUniformfv ( GLuint program, GLint location, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetUniformfv", 224, file, line );
-    gldlGetUniformfv_impl( program, location, params );
+    int breakpoint = DebugTest( 224 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetUniformfv( program=%s, location=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetUniformfv_impl( program, location, params );
 }
 
 void gldlGetUniformiv ( GLuint program, GLint location, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetUniformiv", 225, file, line );
-    gldlGetUniformiv_impl( program, location, params );
+    int breakpoint = DebugTest( 225 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetUniformiv( program=%s, location=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetUniformiv_impl( program, location, params );
 }
 
 void gldlGetVertexAttribdv ( GLuint index, GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetVertexAttribdv", 231, file, line );
-    gldlGetVertexAttribdv_impl( index, pname, params );
+    int breakpoint = DebugTest( 231 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetVertexAttribdv( index=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetVertexAttribdv_impl( index, pname, params );
 }
 
 void gldlGetVertexAttribfv ( GLuint index, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetVertexAttribfv", 232, file, line );
-    gldlGetVertexAttribfv_impl( index, pname, params );
+    int breakpoint = DebugTest( 232 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetVertexAttribfv( index=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetVertexAttribfv_impl( index, pname, params );
 }
 
 void gldlGetVertexAttribiv ( GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetVertexAttribiv", 233, file, line );
-    gldlGetVertexAttribiv_impl( index, pname, params );
+    int breakpoint = DebugTest( 233 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetVertexAttribiv( index=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetVertexAttribiv_impl( index, pname, params );
 }
 
 void gldlGetVertexAttribPointerv ( GLuint index, GLenum pname, GLvoid* *pointer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribPointerv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetVertexAttribPointerv", 230, file, line );
-    gldlGetVertexAttribPointerv_impl( index, pname, pointer );
+    int breakpoint = DebugTest( 230 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetVertexAttribPointerv( index=%s, pname=%s, pointer=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetVertexAttribPointerv_impl( index, pname, pointer );
 }
 
 GLboolean gldlIsProgram ( GLuint program, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsProgram( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsProgram", 258, file, line );
-    return gldlIsProgram_impl( program );
+    int breakpoint = DebugTest( 258 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsProgram( program=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsProgram_impl( program );
 }
 
 GLboolean gldlIsShader ( GLuint shader, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsShader( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsShader", 263, file, line );
-    return gldlIsShader_impl( shader );
+    int breakpoint = DebugTest( 263 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsShader( shader=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsShader_impl( shader );
 }
 
 void gldlLinkProgram ( GLuint program, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glLinkProgram( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glLinkProgram", 269, file, line );
-    gldlLinkProgram_impl( program );
+    int breakpoint = DebugTest( 269 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glLinkProgram( program=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlLinkProgram_impl( program );
 }
 
 void gldlShaderSource ( GLuint shader, GLsizei count, const GLchar* *string, const GLint *length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glShaderSource( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glShaderSource", 379, file, line );
-    gldlShaderSource_impl( shader, count, string, length );
+    int breakpoint = DebugTest( 379 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glShaderSource( shader=%s, count=%s, string=%s, length=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlShaderSource_impl( shader, count, string, length );
 }
 
 void gldlUseProgram ( GLuint program, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUseProgram( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glUseProgram", 469, file, line );
-    gldlUseProgram_impl( program );
+    int breakpoint = DebugTest( 469 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUseProgram( program=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlUseProgram_impl( program );
 }
 
 void gldlUniform1f ( GLint location, GLfloat v0, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1f( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glUniform1f", 418, file, line );
-    gldlUniform1f_impl( location, v0 );
+    int breakpoint = DebugTest( 418 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform1f( location=%s, v0=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlUniform1f_impl( location, v0 );
 }
 
 void gldlUniform2f ( GLint location, GLfloat v0, GLfloat v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform2f", 426, file, line );
-    gldlUniform2f_impl( location, v0, v1 );
+    int breakpoint = DebugTest( 426 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform2f( location=%s, v0=%s, v1=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform2f_impl( location, v0, v1 );
 }
 
 void gldlUniform3f ( GLint location, GLfloat v0, GLfloat v1, GLfloat v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniform3f", 434, file, line );
-    gldlUniform3f_impl( location, v0, v1, v2 );
+    int breakpoint = DebugTest( 434 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform3f( location=%s, v0=%s, v1=%s, v2=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniform3f_impl( location, v0, v1, v2 );
 }
 
 void gldlUniform4f ( GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glUniform4f", 442, file, line );
-    gldlUniform4f_impl( location, v0, v1, v2, v3 );
+    int breakpoint = DebugTest( 442 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform4f( location=%s, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlUniform4f_impl( location, v0, v1, v2, v3 );
 }
 
 void gldlUniform1i ( GLint location, GLint v0, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1i( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glUniform1i", 420, file, line );
-    gldlUniform1i_impl( location, v0 );
+    int breakpoint = DebugTest( 420 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform1i( location=%s, v0=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlUniform1i_impl( location, v0 );
 }
 
 void gldlUniform2i ( GLint location, GLint v0, GLint v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform2i", 428, file, line );
-    gldlUniform2i_impl( location, v0, v1 );
+    int breakpoint = DebugTest( 428 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform2i( location=%s, v0=%s, v1=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform2i_impl( location, v0, v1 );
 }
 
 void gldlUniform3i ( GLint location, GLint v0, GLint v1, GLint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniform3i", 436, file, line );
-    gldlUniform3i_impl( location, v0, v1, v2 );
+    int breakpoint = DebugTest( 436 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform3i( location=%s, v0=%s, v1=%s, v2=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniform3i_impl( location, v0, v1, v2 );
 }
 
 void gldlUniform4i ( GLint location, GLint v0, GLint v1, GLint v2, GLint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glUniform4i", 444, file, line );
-    gldlUniform4i_impl( location, v0, v1, v2, v3 );
+    int breakpoint = DebugTest( 444 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform4i( location=%s, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlUniform4i_impl( location, v0, v1, v2, v3 );
 }
 
 void gldlUniform1fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform1fv", 419, file, line );
-    gldlUniform1fv_impl( location, count, value );
+    int breakpoint = DebugTest( 419 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform1fv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform1fv_impl( location, count, value );
 }
 
 void gldlUniform2fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform2fv", 427, file, line );
-    gldlUniform2fv_impl( location, count, value );
+    int breakpoint = DebugTest( 427 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform2fv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform2fv_impl( location, count, value );
 }
 
 void gldlUniform3fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform3fv", 435, file, line );
-    gldlUniform3fv_impl( location, count, value );
+    int breakpoint = DebugTest( 435 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform3fv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform3fv_impl( location, count, value );
 }
 
 void gldlUniform4fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform4fv", 443, file, line );
-    gldlUniform4fv_impl( location, count, value );
+    int breakpoint = DebugTest( 443 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform4fv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform4fv_impl( location, count, value );
 }
 
 void gldlUniform1iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform1iv", 421, file, line );
-    gldlUniform1iv_impl( location, count, value );
+    int breakpoint = DebugTest( 421 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform1iv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform1iv_impl( location, count, value );
 }
 
 void gldlUniform2iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform2iv", 429, file, line );
-    gldlUniform2iv_impl( location, count, value );
+    int breakpoint = DebugTest( 429 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform2iv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform2iv_impl( location, count, value );
 }
 
 void gldlUniform3iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform3iv", 437, file, line );
-    gldlUniform3iv_impl( location, count, value );
+    int breakpoint = DebugTest( 437 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform3iv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform3iv_impl( location, count, value );
 }
 
 void gldlUniform4iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform4iv", 445, file, line );
-    gldlUniform4iv_impl( location, count, value );
+    int breakpoint = DebugTest( 445 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform4iv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform4iv_impl( location, count, value );
 }
 
 void gldlUniformMatrix2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix2fv", 450, file, line );
-    gldlUniformMatrix2fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 450 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix2fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix2fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix3fv", 456, file, line );
-    gldlUniformMatrix3fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 456 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix3fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix3fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix4fv", 462, file, line );
-    gldlUniformMatrix4fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 462 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix4fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix4fv_impl( location, count, transpose, value );
 }
 
 void gldlValidateProgram ( GLuint program, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glValidateProgram( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glValidateProgram", 471, file, line );
-    gldlValidateProgram_impl( program );
+    int breakpoint = DebugTest( 471 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glValidateProgram( program=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlValidateProgram_impl( program );
 }
 
 void gldlVertexAttrib1d ( GLuint index, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1d( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib1d", 473, file, line );
-    gldlVertexAttrib1d_impl( index, x );
+    int breakpoint = DebugTest( 473 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib1d( index=%s, x=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib1d_impl( index, x );
 }
 
 void gldlVertexAttrib1dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1dv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib1dv", 474, file, line );
-    gldlVertexAttrib1dv_impl( index, v );
+    int breakpoint = DebugTest( 474 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib1dv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib1dv_impl( index, v );
 }
 
 void gldlVertexAttrib1f ( GLuint index, GLfloat x, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1f( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib1f", 475, file, line );
-    gldlVertexAttrib1f_impl( index, x );
+    int breakpoint = DebugTest( 475 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib1f( index=%s, x=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib1f_impl( index, x );
 }
 
 void gldlVertexAttrib1fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1fv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib1fv", 476, file, line );
-    gldlVertexAttrib1fv_impl( index, v );
+    int breakpoint = DebugTest( 476 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib1fv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib1fv_impl( index, v );
 }
 
 void gldlVertexAttrib1s ( GLuint index, GLshort x, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1s( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib1s", 477, file, line );
-    gldlVertexAttrib1s_impl( index, x );
+    int breakpoint = DebugTest( 477 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib1s( index=%s, x=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib1s_impl( index, x );
 }
 
 void gldlVertexAttrib1sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib1sv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib1sv", 478, file, line );
-    gldlVertexAttrib1sv_impl( index, v );
+    int breakpoint = DebugTest( 478 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib1sv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib1sv_impl( index, v );
 }
 
 void gldlVertexAttrib2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glVertexAttrib2d", 479, file, line );
-    gldlVertexAttrib2d_impl( index, x, y );
+    int breakpoint = DebugTest( 479 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib2d( index=%s, x=%s, y=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib2d_impl( index, x, y );
 }
 
 void gldlVertexAttrib2dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2dv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib2dv", 480, file, line );
-    gldlVertexAttrib2dv_impl( index, v );
+    int breakpoint = DebugTest( 480 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib2dv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib2dv_impl( index, v );
 }
 
 void gldlVertexAttrib2f ( GLuint index, GLfloat x, GLfloat y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glVertexAttrib2f", 481, file, line );
-    gldlVertexAttrib2f_impl( index, x, y );
+    int breakpoint = DebugTest( 481 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib2f( index=%s, x=%s, y=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib2f_impl( index, x, y );
 }
 
 void gldlVertexAttrib2fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2fv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib2fv", 482, file, line );
-    gldlVertexAttrib2fv_impl( index, v );
+    int breakpoint = DebugTest( 482 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib2fv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib2fv_impl( index, v );
 }
 
 void gldlVertexAttrib2s ( GLuint index, GLshort x, GLshort y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2s( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glVertexAttrib2s", 483, file, line );
-    gldlVertexAttrib2s_impl( index, x, y );
+    int breakpoint = DebugTest( 483 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib2s( index=%s, x=%s, y=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib2s_impl( index, x, y );
 }
 
 void gldlVertexAttrib2sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib2sv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib2sv", 484, file, line );
-    gldlVertexAttrib2sv_impl( index, v );
+    int breakpoint = DebugTest( 484 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib2sv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib2sv_impl( index, v );
 }
 
 void gldlVertexAttrib3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttrib3d", 485, file, line );
-    gldlVertexAttrib3d_impl( index, x, y, z );
+    int breakpoint = DebugTest( 485 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib3d( index=%s, x=%s, y=%s, z=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib3d_impl( index, x, y, z );
 }
 
 void gldlVertexAttrib3dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3dv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib3dv", 486, file, line );
-    gldlVertexAttrib3dv_impl( index, v );
+    int breakpoint = DebugTest( 486 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib3dv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib3dv_impl( index, v );
 }
 
 void gldlVertexAttrib3f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttrib3f", 487, file, line );
-    gldlVertexAttrib3f_impl( index, x, y, z );
+    int breakpoint = DebugTest( 487 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib3f( index=%s, x=%s, y=%s, z=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib3f_impl( index, x, y, z );
 }
 
 void gldlVertexAttrib3fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3fv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib3fv", 488, file, line );
-    gldlVertexAttrib3fv_impl( index, v );
+    int breakpoint = DebugTest( 488 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib3fv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib3fv_impl( index, v );
 }
 
 void gldlVertexAttrib3s ( GLuint index, GLshort x, GLshort y, GLshort z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3s( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttrib3s", 489, file, line );
-    gldlVertexAttrib3s_impl( index, x, y, z );
+    int breakpoint = DebugTest( 489 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib3s( index=%s, x=%s, y=%s, z=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib3s_impl( index, x, y, z );
 }
 
 void gldlVertexAttrib3sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib3sv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib3sv", 490, file, line );
-    gldlVertexAttrib3sv_impl( index, v );
+    int breakpoint = DebugTest( 490 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib3sv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib3sv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nbv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nbv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4Nbv", 491, file, line );
-    gldlVertexAttrib4Nbv_impl( index, v );
+    int breakpoint = DebugTest( 491 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4Nbv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4Nbv_impl( index, v );
 }
 
 void gldlVertexAttrib4Niv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Niv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4Niv", 492, file, line );
-    gldlVertexAttrib4Niv_impl( index, v );
+    int breakpoint = DebugTest( 492 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4Niv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4Niv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nsv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nsv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4Nsv", 493, file, line );
-    gldlVertexAttrib4Nsv_impl( index, v );
+    int breakpoint = DebugTest( 493 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4Nsv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4Nsv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nub ( GLuint index, GLubyte x, GLubyte y, GLubyte z, GLubyte w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nub( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttrib4Nub", 494, file, line );
-    gldlVertexAttrib4Nub_impl( index, x, y, z, w );
+    int breakpoint = DebugTest( 494 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4Nub( index=%s, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4Nub_impl( index, x, y, z, w );
 }
 
 void gldlVertexAttrib4Nubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nubv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4Nubv", 495, file, line );
-    gldlVertexAttrib4Nubv_impl( index, v );
+    int breakpoint = DebugTest( 495 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4Nubv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4Nubv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nuiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nuiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4Nuiv", 496, file, line );
-    gldlVertexAttrib4Nuiv_impl( index, v );
+    int breakpoint = DebugTest( 496 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4Nuiv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4Nuiv_impl( index, v );
 }
 
 void gldlVertexAttrib4Nusv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nusv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4Nusv", 497, file, line );
-    gldlVertexAttrib4Nusv_impl( index, v );
+    int breakpoint = DebugTest( 497 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4Nusv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4Nusv_impl( index, v );
 }
 
 void gldlVertexAttrib4bv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4bv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4bv", 498, file, line );
-    gldlVertexAttrib4bv_impl( index, v );
+    int breakpoint = DebugTest( 498 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4bv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4bv_impl( index, v );
 }
 
 void gldlVertexAttrib4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttrib4d", 499, file, line );
-    gldlVertexAttrib4d_impl( index, x, y, z, w );
+    int breakpoint = DebugTest( 499 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4d( index=%s, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4d_impl( index, x, y, z, w );
 }
 
 void gldlVertexAttrib4dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4dv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4dv", 500, file, line );
-    gldlVertexAttrib4dv_impl( index, v );
+    int breakpoint = DebugTest( 500 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4dv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4dv_impl( index, v );
 }
 
 void gldlVertexAttrib4f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttrib4f", 501, file, line );
-    gldlVertexAttrib4f_impl( index, x, y, z, w );
+    int breakpoint = DebugTest( 501 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4f( index=%s, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4f_impl( index, x, y, z, w );
 }
 
 void gldlVertexAttrib4fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4fv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4fv", 502, file, line );
-    gldlVertexAttrib4fv_impl( index, v );
+    int breakpoint = DebugTest( 502 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4fv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4fv_impl( index, v );
 }
 
 void gldlVertexAttrib4iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4iv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4iv", 503, file, line );
-    gldlVertexAttrib4iv_impl( index, v );
+    int breakpoint = DebugTest( 503 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4iv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4iv_impl( index, v );
 }
 
 void gldlVertexAttrib4s ( GLuint index, GLshort x, GLshort y, GLshort z, GLshort w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4s( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttrib4s", 504, file, line );
-    gldlVertexAttrib4s_impl( index, x, y, z, w );
+    int breakpoint = DebugTest( 504 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4s( index=%s, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4s_impl( index, x, y, z, w );
 }
 
 void gldlVertexAttrib4sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4sv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4sv", 505, file, line );
-    gldlVertexAttrib4sv_impl( index, v );
+    int breakpoint = DebugTest( 505 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4sv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4sv_impl( index, v );
 }
 
 void gldlVertexAttrib4ubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4ubv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4ubv", 506, file, line );
-    gldlVertexAttrib4ubv_impl( index, v );
+    int breakpoint = DebugTest( 506 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4ubv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4ubv_impl( index, v );
 }
 
 void gldlVertexAttrib4uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4uiv", 507, file, line );
-    gldlVertexAttrib4uiv_impl( index, v );
+    int breakpoint = DebugTest( 507 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4uiv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4uiv_impl( index, v );
 }
 
 void gldlVertexAttrib4usv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttrib4usv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttrib4usv", 508, file, line );
-    gldlVertexAttrib4usv_impl( index, v );
+    int breakpoint = DebugTest( 508 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttrib4usv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttrib4usv_impl( index, v );
 }
 
 void gldlVertexAttribPointer ( GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribPointer( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glVertexAttribPointer", 548, file, line );
-    gldlVertexAttribPointer_impl( index, size, type, normalized, stride, pointer );
+    int breakpoint = DebugTest( 548 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribPointer( index=%s, size=%s, type=%s, normalized=%s, stride=%s, pointer=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribPointer_impl( index, size, type, normalized, stride, pointer );
 }
 
 void gldlUniformMatrix2x3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2x3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix2x3fv", 452, file, line );
-    gldlUniformMatrix2x3fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 452 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix2x3fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix2x3fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3x2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3x2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix3x2fv", 458, file, line );
-    gldlUniformMatrix3x2fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 458 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix3x2fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix3x2fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix2x4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2x4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix2x4fv", 454, file, line );
-    gldlUniformMatrix2x4fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 454 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix2x4fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix2x4fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4x2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4x2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix4x2fv", 464, file, line );
-    gldlUniformMatrix4x2fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 464 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix4x2fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix4x2fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3x4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3x4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix3x4fv", 460, file, line );
-    gldlUniformMatrix3x4fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 460 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix3x4fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix3x4fv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4x3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4x3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix4x3fv", 466, file, line );
-    gldlUniformMatrix4x3fv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 466 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix4x3fv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix4x3fv_impl( location, count, transpose, value );
 }
 
 void gldlColorMaski ( GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboolean a, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glColorMaski( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glColorMaski", 50, file, line );
-    gldlColorMaski_impl( index, r, g, b, a );
+    int breakpoint = DebugTest( 50 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glColorMaski( index=%s, r=%s, g=%s, b=%s, a=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlColorMaski_impl( index, r, g, b, a );
 }
 
 void gldlGetBooleani_v ( GLenum target, GLuint index, GLboolean *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBooleani_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetBooleani_v", 159, file, line );
-    gldlGetBooleani_v_impl( target, index, data );
+    int breakpoint = DebugTest( 159 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetBooleani_v( target=%s, index=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetBooleani_v_impl( target, index, data );
 }
 
 void gldlGetIntegeri_v ( GLenum target, GLuint index, GLint *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetIntegeri_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetIntegeri_v", 178, file, line );
-    gldlGetIntegeri_v_impl( target, index, data );
+    int breakpoint = DebugTest( 178 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetIntegeri_v( target=%s, index=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetIntegeri_v_impl( target, index, data );
 }
 
 void gldlEnablei ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEnablei( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glEnablei", 121, file, line );
-    gldlEnablei_impl( target, index );
+    int breakpoint = DebugTest( 121 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glEnablei( target=%s, index=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlEnablei_impl( target, index );
 }
 
 void gldlDisablei ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDisablei( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDisablei", 99, file, line );
-    gldlDisablei_impl( target, index );
+    int breakpoint = DebugTest( 99 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDisablei( target=%s, index=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDisablei_impl( target, index );
 }
 
 GLboolean gldlIsEnabledi ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsEnabledi( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glIsEnabledi", 255, file, line );
-    return gldlIsEnabledi_impl( target, index );
+    int breakpoint = DebugTest( 255 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsEnabledi( target=%s, index=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlIsEnabledi_impl( target, index );
 }
 
 void gldlBeginTransformFeedback ( GLenum primitiveMode, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBeginTransformFeedback( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glBeginTransformFeedback", 6, file, line );
-    gldlBeginTransformFeedback_impl( primitiveMode );
+    int breakpoint = DebugTest( 6 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBeginTransformFeedback( primitiveMode=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlBeginTransformFeedback_impl( primitiveMode );
 }
 
 void gldlEndTransformFeedback ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEndTransformFeedback();\n", file, line );
 
-    DebugTest( "glEndTransformFeedback", 125, file, line );
-    gldlEndTransformFeedback_impl(  );
+    int breakpoint = DebugTest( 125 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glEndTransformFeedback( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	gldlEndTransformFeedback_impl(  );
 }
 
 void gldlBindBufferRange ( GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindBufferRange( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glBindBufferRange", 10, file, line );
-    gldlBindBufferRange_impl( target, index, buffer, offset, size );
+    int breakpoint = DebugTest( 10 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindBufferRange( target=%s, index=%s, buffer=%s, offset=%s, size=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlBindBufferRange_impl( target, index, buffer, offset, size );
 }
 
 void gldlBindBufferBase ( GLenum target, GLuint index, GLuint buffer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindBufferBase( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glBindBufferBase", 9, file, line );
-    gldlBindBufferBase_impl( target, index, buffer );
+    int breakpoint = DebugTest( 9 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindBufferBase( target=%s, index=%s, buffer=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlBindBufferBase_impl( target, index, buffer );
 }
 
 void gldlTransformFeedbackVaryings ( GLuint program, GLsizei count, const GLchar* *varyings, GLenum bufferMode, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTransformFeedbackVaryings( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glTransformFeedbackVaryings", 415, file, line );
-    gldlTransformFeedbackVaryings_impl( program, count, varyings, bufferMode );
+    int breakpoint = DebugTest( 415 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTransformFeedbackVaryings( program=%s, count=%s, varyings=%s, bufferMode=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlTransformFeedbackVaryings_impl( program, count, varyings, bufferMode );
 }
 
 void gldlGetTransformFeedbackVarying ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTransformFeedbackVarying( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glGetTransformFeedbackVarying", 218, file, line );
-    gldlGetTransformFeedbackVarying_impl( program, index, bufSize, length, size, type, name );
+    int breakpoint = DebugTest( 218 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetTransformFeedbackVarying( program=%s, index=%s, bufSize=%s, length=%s, size=%s, type=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlGetTransformFeedbackVarying_impl( program, index, bufSize, length, size, type, name );
 }
 
 void gldlClampColor ( GLenum target, GLenum clamp, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClampColor( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glClampColor", 38, file, line );
-    gldlClampColor_impl( target, clamp );
+    int breakpoint = DebugTest( 38 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClampColor( target=%s, clamp=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlClampColor_impl( target, clamp );
 }
 
 void gldlBeginConditionalRender ( GLuint id, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBeginConditionalRender( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBeginConditionalRender", 3, file, line );
-    gldlBeginConditionalRender_impl( id, mode );
+    int breakpoint = DebugTest( 3 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBeginConditionalRender( id=%s, mode=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBeginConditionalRender_impl( id, mode );
 }
 
 void gldlEndConditionalRender ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEndConditionalRender();\n", file, line );
 
-    DebugTest( "glEndConditionalRender", 122, file, line );
-    gldlEndConditionalRender_impl(  );
+    int breakpoint = DebugTest( 122 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glEndConditionalRender( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	gldlEndConditionalRender_impl(  );
 }
 
 void gldlVertexAttribIPointer ( GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribIPointer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttribIPointer", 530, file, line );
-    gldlVertexAttribIPointer_impl( index, size, type, stride, pointer );
+    int breakpoint = DebugTest( 530 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribIPointer( index=%s, size=%s, type=%s, stride=%s, pointer=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribIPointer_impl( index, size, type, stride, pointer );
 }
 
 void gldlGetVertexAttribIiv ( GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetVertexAttribIiv", 227, file, line );
-    gldlGetVertexAttribIiv_impl( index, pname, params );
+    int breakpoint = DebugTest( 227 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetVertexAttribIiv( index=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetVertexAttribIiv_impl( index, pname, params );
 }
 
 void gldlGetVertexAttribIuiv ( GLuint index, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetVertexAttribIuiv", 228, file, line );
-    gldlGetVertexAttribIuiv_impl( index, pname, params );
+    int breakpoint = DebugTest( 228 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetVertexAttribIuiv( index=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetVertexAttribIuiv_impl( index, pname, params );
 }
 
 void gldlVertexAttribI1i ( GLuint index, GLint x, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI1i( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI1i", 510, file, line );
-    gldlVertexAttribI1i_impl( index, x );
+    int breakpoint = DebugTest( 510 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI1i( index=%s, x=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI1i_impl( index, x );
 }
 
 void gldlVertexAttribI2i ( GLuint index, GLint x, GLint y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI2i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glVertexAttribI2i", 514, file, line );
-    gldlVertexAttribI2i_impl( index, x, y );
+    int breakpoint = DebugTest( 514 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI2i( index=%s, x=%s, y=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI2i_impl( index, x, y );
 }
 
 void gldlVertexAttribI3i ( GLuint index, GLint x, GLint y, GLint z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI3i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribI3i", 518, file, line );
-    gldlVertexAttribI3i_impl( index, x, y, z );
+    int breakpoint = DebugTest( 518 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI3i( index=%s, x=%s, y=%s, z=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI3i_impl( index, x, y, z );
 }
 
 void gldlVertexAttribI4i ( GLuint index, GLint x, GLint y, GLint z, GLint w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttribI4i", 523, file, line );
-    gldlVertexAttribI4i_impl( index, x, y, z, w );
+    int breakpoint = DebugTest( 523 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI4i( index=%s, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI4i_impl( index, x, y, z, w );
 }
 
 void gldlVertexAttribI1ui ( GLuint index, GLuint x, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI1ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI1ui", 512, file, line );
-    gldlVertexAttribI1ui_impl( index, x );
+    int breakpoint = DebugTest( 512 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI1ui( index=%s, x=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI1ui_impl( index, x );
 }
 
 void gldlVertexAttribI2ui ( GLuint index, GLuint x, GLuint y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glVertexAttribI2ui", 516, file, line );
-    gldlVertexAttribI2ui_impl( index, x, y );
+    int breakpoint = DebugTest( 516 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI2ui( index=%s, x=%s, y=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI2ui_impl( index, x, y );
 }
 
 void gldlVertexAttribI3ui ( GLuint index, GLuint x, GLuint y, GLuint z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribI3ui", 520, file, line );
-    gldlVertexAttribI3ui_impl( index, x, y, z );
+    int breakpoint = DebugTest( 520 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI3ui( index=%s, x=%s, y=%s, z=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI3ui_impl( index, x, y, z );
 }
 
 void gldlVertexAttribI4ui ( GLuint index, GLuint x, GLuint y, GLuint z, GLuint w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttribI4ui", 527, file, line );
-    gldlVertexAttribI4ui_impl( index, x, y, z, w );
+    int breakpoint = DebugTest( 527 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI4ui( index=%s, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI4ui_impl( index, x, y, z, w );
 }
 
 void gldlVertexAttribI1iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI1iv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI1iv", 511, file, line );
-    gldlVertexAttribI1iv_impl( index, v );
+    int breakpoint = DebugTest( 511 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI1iv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI1iv_impl( index, v );
 }
 
 void gldlVertexAttribI2iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI2iv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI2iv", 515, file, line );
-    gldlVertexAttribI2iv_impl( index, v );
+    int breakpoint = DebugTest( 515 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI2iv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI2iv_impl( index, v );
 }
 
 void gldlVertexAttribI3iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI3iv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI3iv", 519, file, line );
-    gldlVertexAttribI3iv_impl( index, v );
+    int breakpoint = DebugTest( 519 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI3iv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI3iv_impl( index, v );
 }
 
 void gldlVertexAttribI4iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4iv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI4iv", 524, file, line );
-    gldlVertexAttribI4iv_impl( index, v );
+    int breakpoint = DebugTest( 524 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI4iv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI4iv_impl( index, v );
 }
 
 void gldlVertexAttribI1uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI1uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI1uiv", 513, file, line );
-    gldlVertexAttribI1uiv_impl( index, v );
+    int breakpoint = DebugTest( 513 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI1uiv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI1uiv_impl( index, v );
 }
 
 void gldlVertexAttribI2uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI2uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI2uiv", 517, file, line );
-    gldlVertexAttribI2uiv_impl( index, v );
+    int breakpoint = DebugTest( 517 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI2uiv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI2uiv_impl( index, v );
 }
 
 void gldlVertexAttribI3uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI3uiv", 521, file, line );
-    gldlVertexAttribI3uiv_impl( index, v );
+    int breakpoint = DebugTest( 521 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI3uiv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI3uiv_impl( index, v );
 }
 
 void gldlVertexAttribI4uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI4uiv", 528, file, line );
-    gldlVertexAttribI4uiv_impl( index, v );
+    int breakpoint = DebugTest( 528 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI4uiv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI4uiv_impl( index, v );
 }
 
 void gldlVertexAttribI4bv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4bv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI4bv", 522, file, line );
-    gldlVertexAttribI4bv_impl( index, v );
+    int breakpoint = DebugTest( 522 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI4bv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI4bv_impl( index, v );
 }
 
 void gldlVertexAttribI4sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4sv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI4sv", 525, file, line );
-    gldlVertexAttribI4sv_impl( index, v );
+    int breakpoint = DebugTest( 525 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI4sv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI4sv_impl( index, v );
 }
 
 void gldlVertexAttribI4ubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4ubv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI4ubv", 526, file, line );
-    gldlVertexAttribI4ubv_impl( index, v );
+    int breakpoint = DebugTest( 526 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI4ubv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI4ubv_impl( index, v );
 }
 
 void gldlVertexAttribI4usv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribI4usv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribI4usv", 529, file, line );
-    gldlVertexAttribI4usv_impl( index, v );
+    int breakpoint = DebugTest( 529 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribI4usv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribI4usv_impl( index, v );
 }
 
 void gldlGetUniformuiv ( GLuint program, GLint location, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetUniformuiv", 226, file, line );
-    gldlGetUniformuiv_impl( program, location, params );
+    int breakpoint = DebugTest( 226 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetUniformuiv( program=%s, location=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetUniformuiv_impl( program, location, params );
 }
 
 void gldlBindFragDataLocation ( GLuint program, GLuint color, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindFragDataLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glBindFragDataLocation", 11, file, line );
-    gldlBindFragDataLocation_impl( program, color, name );
+    int breakpoint = DebugTest( 11 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindFragDataLocation( program=%s, color=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlBindFragDataLocation_impl( program, color, name );
 }
 
 GLint gldlGetFragDataLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFragDataLocation( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetFragDataLocation", 173, file, line );
-    return gldlGetFragDataLocation_impl( program, name );
+    int breakpoint = DebugTest( 173 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetFragDataLocation( program=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlGetFragDataLocation_impl( program, name );
 }
 
 void gldlUniform1ui ( GLint location, GLuint v0, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glUniform1ui", 422, file, line );
-    gldlUniform1ui_impl( location, v0 );
+    int breakpoint = DebugTest( 422 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform1ui( location=%s, v0=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlUniform1ui_impl( location, v0 );
 }
 
 void gldlUniform2ui ( GLint location, GLuint v0, GLuint v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform2ui", 430, file, line );
-    gldlUniform2ui_impl( location, v0, v1 );
+    int breakpoint = DebugTest( 430 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform2ui( location=%s, v0=%s, v1=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform2ui_impl( location, v0, v1 );
 }
 
 void gldlUniform3ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniform3ui", 438, file, line );
-    gldlUniform3ui_impl( location, v0, v1, v2 );
+    int breakpoint = DebugTest( 438 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform3ui( location=%s, v0=%s, v1=%s, v2=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniform3ui_impl( location, v0, v1, v2 );
 }
 
 void gldlUniform4ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glUniform4ui", 446, file, line );
-    gldlUniform4ui_impl( location, v0, v1, v2, v3 );
+    int breakpoint = DebugTest( 446 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform4ui( location=%s, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlUniform4ui_impl( location, v0, v1, v2, v3 );
 }
 
 void gldlUniform1uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform1uiv", 423, file, line );
-    gldlUniform1uiv_impl( location, count, value );
+    int breakpoint = DebugTest( 423 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform1uiv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform1uiv_impl( location, count, value );
 }
 
 void gldlUniform2uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform2uiv", 431, file, line );
-    gldlUniform2uiv_impl( location, count, value );
+    int breakpoint = DebugTest( 431 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform2uiv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform2uiv_impl( location, count, value );
 }
 
 void gldlUniform3uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform3uiv", 439, file, line );
-    gldlUniform3uiv_impl( location, count, value );
+    int breakpoint = DebugTest( 439 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform3uiv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform3uiv_impl( location, count, value );
 }
 
 void gldlUniform4uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform4uiv", 447, file, line );
-    gldlUniform4uiv_impl( location, count, value );
+    int breakpoint = DebugTest( 447 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform4uiv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform4uiv_impl( location, count, value );
 }
 
 void gldlTexParameterIiv ( GLenum target, GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glTexParameterIiv", 400, file, line );
-    gldlTexParameterIiv_impl( target, pname, params );
+    int breakpoint = DebugTest( 400 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexParameterIiv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlTexParameterIiv_impl( target, pname, params );
 }
 
 void gldlTexParameterIuiv ( GLenum target, GLenum pname, const GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glTexParameterIuiv", 401, file, line );
-    gldlTexParameterIuiv_impl( target, pname, params );
+    int breakpoint = DebugTest( 401 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexParameterIuiv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlTexParameterIuiv_impl( target, pname, params );
 }
 
 void gldlGetTexParameterIiv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetTexParameterIiv", 214, file, line );
-    gldlGetTexParameterIiv_impl( target, pname, params );
+    int breakpoint = DebugTest( 214 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetTexParameterIiv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetTexParameterIiv_impl( target, pname, params );
 }
 
 void gldlGetTexParameterIuiv ( GLenum target, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetTexParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetTexParameterIuiv", 215, file, line );
-    gldlGetTexParameterIuiv_impl( target, pname, params );
+    int breakpoint = DebugTest( 215 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetTexParameterIuiv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetTexParameterIuiv_impl( target, pname, params );
 }
 
 void gldlClearBufferiv ( GLenum buffer, GLint drawbuffer, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearBufferiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glClearBufferiv", 42, file, line );
-    gldlClearBufferiv_impl( buffer, drawbuffer, value );
+    int breakpoint = DebugTest( 42 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClearBufferiv( buffer=%s, drawbuffer=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlClearBufferiv_impl( buffer, drawbuffer, value );
 }
 
 void gldlClearBufferuiv ( GLenum buffer, GLint drawbuffer, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearBufferuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glClearBufferuiv", 43, file, line );
-    gldlClearBufferuiv_impl( buffer, drawbuffer, value );
+    int breakpoint = DebugTest( 43 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClearBufferuiv( buffer=%s, drawbuffer=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlClearBufferuiv_impl( buffer, drawbuffer, value );
 }
 
 void gldlClearBufferfv ( GLenum buffer, GLint drawbuffer, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearBufferfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glClearBufferfv", 41, file, line );
-    gldlClearBufferfv_impl( buffer, drawbuffer, value );
+    int breakpoint = DebugTest( 41 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClearBufferfv( buffer=%s, drawbuffer=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlClearBufferfv_impl( buffer, drawbuffer, value );
 }
 
 void gldlClearBufferfi ( GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearBufferfi( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glClearBufferfi", 40, file, line );
-    gldlClearBufferfi_impl( buffer, drawbuffer, depth, stencil );
+    int breakpoint = DebugTest( 40 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClearBufferfi( buffer=%s, drawbuffer=%s, depth=%s, stencil=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlClearBufferfi_impl( buffer, drawbuffer, depth, stencil );
 }
 
 const GLubyte * gldlGetStringi ( GLenum name, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetStringi( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetStringi", 207, file, line );
-    return gldlGetStringi_impl( name, index );
+    int breakpoint = DebugTest( 207 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetStringi( name=%s, index=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlGetStringi_impl( name, index );
 }
 
 void gldlDrawArraysInstanced ( GLenum mode, GLint first, GLsizei count, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawArraysInstanced( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glDrawArraysInstanced", 102, file, line );
-    gldlDrawArraysInstanced_impl( mode, first, count, primcount );
+    int breakpoint = DebugTest( 102 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawArraysInstanced( mode=%s, first=%s, count=%s, primcount=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlDrawArraysInstanced_impl( mode, first, count, primcount );
 }
 
 void gldlDrawElementsInstanced ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsInstanced( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glDrawElementsInstanced", 109, file, line );
-    gldlDrawElementsInstanced_impl( mode, count, type, indices, primcount );
+    int breakpoint = DebugTest( 109 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawElementsInstanced( mode=%s, count=%s, type=%s, indices=%s, primcount=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlDrawElementsInstanced_impl( mode, count, type, indices, primcount );
 }
 
 void gldlTexBuffer ( GLenum target, GLenum internalformat, GLuint buffer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexBuffer( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glTexBuffer", 386, file, line );
-    gldlTexBuffer_impl( target, internalformat, buffer );
+    int breakpoint = DebugTest( 386 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexBuffer( target=%s, internalformat=%s, buffer=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlTexBuffer_impl( target, internalformat, buffer );
 }
 
 void gldlPrimitiveRestartIndex ( GLuint index, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPrimitiveRestartIndex( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glPrimitiveRestartIndex", 302, file, line );
-    gldlPrimitiveRestartIndex_impl( index );
+    int breakpoint = DebugTest( 302 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPrimitiveRestartIndex( index=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlPrimitiveRestartIndex_impl( index );
 }
 
 void gldlGetInteger64i_v ( GLenum target, GLuint index, GLint64 *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetInteger64i_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetInteger64i_v", 176, file, line );
-    gldlGetInteger64i_v_impl( target, index, data );
+    int breakpoint = DebugTest( 176 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetInteger64i_v( target=%s, index=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetInteger64i_v_impl( target, index, data );
 }
 
 void gldlGetBufferParameteri64v ( GLenum target, GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetBufferParameteri64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetBufferParameteri64v", 161, file, line );
-    gldlGetBufferParameteri64v_impl( target, pname, params );
+    int breakpoint = DebugTest( 161 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetBufferParameteri64v( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetBufferParameteri64v_impl( target, pname, params );
 }
 
 void gldlFramebufferTexture ( GLenum target, GLenum attachment, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFramebufferTexture( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glFramebufferTexture", 131, file, line );
-    gldlFramebufferTexture_impl( target, attachment, texture, level );
+    int breakpoint = DebugTest( 131 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFramebufferTexture( target=%s, attachment=%s, texture=%s, level=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlFramebufferTexture_impl( target, attachment, texture, level );
 }
 
 void gldlVertexAttribDivisor ( GLuint index, GLuint divisor, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribDivisor( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribDivisor", 509, file, line );
-    gldlVertexAttribDivisor_impl( index, divisor );
+    int breakpoint = DebugTest( 509 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribDivisor( index=%s, divisor=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribDivisor_impl( index, divisor );
 }
 
 void gldlMinSampleShading ( GLclampf value, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMinSampleShading( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glMinSampleShading", 274, file, line );
-    gldlMinSampleShading_impl( value );
+    int breakpoint = DebugTest( 274 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMinSampleShading( value=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlMinSampleShading_impl( value );
 }
 
 void gldlBlendEquationi ( GLuint buf, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendEquationi( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBlendEquationi", 26, file, line );
-    gldlBlendEquationi_impl( buf, mode );
+    int breakpoint = DebugTest( 26 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendEquationi( buf=%s, mode=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBlendEquationi_impl( buf, mode );
 }
 
 void gldlBlendEquationSeparatei ( GLuint buf, GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendEquationSeparatei( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glBlendEquationSeparatei", 24, file, line );
-    gldlBlendEquationSeparatei_impl( buf, modeRGB, modeAlpha );
+    int breakpoint = DebugTest( 24 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendEquationSeparatei( buf=%s, modeRGB=%s, modeAlpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlBlendEquationSeparatei_impl( buf, modeRGB, modeAlpha );
 }
 
 void gldlBlendFunci ( GLuint buf, GLenum src, GLenum dst, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendFunci( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glBlendFunci", 32, file, line );
-    gldlBlendFunci_impl( buf, src, dst );
+    int breakpoint = DebugTest( 32 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendFunci( buf=%s, src=%s, dst=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlBlendFunci_impl( buf, src, dst );
 }
 
 void gldlBlendFuncSeparatei ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendFuncSeparatei( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glBlendFuncSeparatei", 30, file, line );
-    gldlBlendFuncSeparatei_impl( buf, srcRGB, dstRGB, srcAlpha, dstAlpha );
+    int breakpoint = DebugTest( 30 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendFuncSeparatei( buf=%s, srcRGB=%s, dstRGB=%s, srcAlpha=%s, dstAlpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlBlendFuncSeparatei_impl( buf, srcRGB, dstRGB, srcAlpha, dstAlpha );
 }
 
 GLboolean gldlIsRenderbuffer ( GLuint renderbuffer, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsRenderbuffer( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsRenderbuffer", 261, file, line );
-    return gldlIsRenderbuffer_impl( renderbuffer );
+    int breakpoint = DebugTest( 261 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsRenderbuffer( renderbuffer=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsRenderbuffer_impl( renderbuffer );
 }
 
 void gldlBindRenderbuffer ( GLenum target, GLuint renderbuffer, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindRenderbuffer( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBindRenderbuffer", 16, file, line );
-    gldlBindRenderbuffer_impl( target, renderbuffer );
+    int breakpoint = DebugTest( 16 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindRenderbuffer( target=%s, renderbuffer=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBindRenderbuffer_impl( target, renderbuffer );
 }
 
 void gldlDeleteRenderbuffers ( GLsizei n, const GLuint *renderbuffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteRenderbuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteRenderbuffers", 83, file, line );
-    gldlDeleteRenderbuffers_impl( n, renderbuffers );
+    int breakpoint = DebugTest( 83 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteRenderbuffers( n=%s, renderbuffers=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteRenderbuffers_impl( n, renderbuffers );
 }
 
 void gldlGenRenderbuffers ( GLsizei n, GLuint *renderbuffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenRenderbuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenRenderbuffers", 141, file, line );
-    gldlGenRenderbuffers_impl( n, renderbuffers );
+    int breakpoint = DebugTest( 141 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenRenderbuffers( n=%s, renderbuffers=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenRenderbuffers_impl( n, renderbuffers );
 }
 
 void gldlRenderbufferStorage ( GLenum target, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glRenderbufferStorage( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glRenderbufferStorage", 361, file, line );
-    gldlRenderbufferStorage_impl( target, internalformat, width, height );
+    int breakpoint = DebugTest( 361 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glRenderbufferStorage( target=%s, internalformat=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlRenderbufferStorage_impl( target, internalformat, width, height );
 }
 
 void gldlGetRenderbufferParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetRenderbufferParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetRenderbufferParameteriv", 197, file, line );
-    gldlGetRenderbufferParameteriv_impl( target, pname, params );
+    int breakpoint = DebugTest( 197 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetRenderbufferParameteriv( target=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetRenderbufferParameteriv_impl( target, pname, params );
 }
 
 GLboolean gldlIsFramebuffer ( GLuint framebuffer, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsFramebuffer( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsFramebuffer", 256, file, line );
-    return gldlIsFramebuffer_impl( framebuffer );
+    int breakpoint = DebugTest( 256 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsFramebuffer( framebuffer=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsFramebuffer_impl( framebuffer );
 }
 
 void gldlBindFramebuffer ( GLenum target, GLuint framebuffer, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindFramebuffer( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBindFramebuffer", 13, file, line );
-    gldlBindFramebuffer_impl( target, framebuffer );
+    int breakpoint = DebugTest( 13 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindFramebuffer( target=%s, framebuffer=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBindFramebuffer_impl( target, framebuffer );
 }
 
 void gldlDeleteFramebuffers ( GLsizei n, const GLuint *framebuffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteFramebuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteFramebuffers", 78, file, line );
-    gldlDeleteFramebuffers_impl( n, framebuffers );
+    int breakpoint = DebugTest( 78 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteFramebuffers( n=%s, framebuffers=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteFramebuffers_impl( n, framebuffers );
 }
 
 void gldlGenFramebuffers ( GLsizei n, GLuint *framebuffers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenFramebuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenFramebuffers", 138, file, line );
-    gldlGenFramebuffers_impl( n, framebuffers );
+    int breakpoint = DebugTest( 138 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenFramebuffers( n=%s, framebuffers=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenFramebuffers_impl( n, framebuffers );
 }
 
 GLenum gldlCheckFramebufferStatus ( GLenum target, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCheckFramebufferStatus( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glCheckFramebufferStatus", 37, file, line );
-    return gldlCheckFramebufferStatus_impl( target );
+    int breakpoint = DebugTest( 37 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCheckFramebufferStatus( target=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlCheckFramebufferStatus_impl( target );
 }
 
 void gldlFramebufferTexture1D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFramebufferTexture1D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glFramebufferTexture1D", 132, file, line );
-    gldlFramebufferTexture1D_impl( target, attachment, textarget, texture, level );
+    int breakpoint = DebugTest( 132 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFramebufferTexture1D( target=%s, attachment=%s, textarget=%s, texture=%s, level=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlFramebufferTexture1D_impl( target, attachment, textarget, texture, level );
 }
 
 void gldlFramebufferTexture2D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFramebufferTexture2D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glFramebufferTexture2D", 133, file, line );
-    gldlFramebufferTexture2D_impl( target, attachment, textarget, texture, level );
+    int breakpoint = DebugTest( 133 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFramebufferTexture2D( target=%s, attachment=%s, textarget=%s, texture=%s, level=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlFramebufferTexture2D_impl( target, attachment, textarget, texture, level );
 }
 
 void gldlFramebufferTexture3D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, GLint zoffset, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFramebufferTexture3D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glFramebufferTexture3D", 134, file, line );
-    gldlFramebufferTexture3D_impl( target, attachment, textarget, texture, level, zoffset );
+    int breakpoint = DebugTest( 134 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFramebufferTexture3D( target=%s, attachment=%s, textarget=%s, texture=%s, level=%s, zoffset=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlFramebufferTexture3D_impl( target, attachment, textarget, texture, level, zoffset );
 }
 
 void gldlFramebufferRenderbuffer ( GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFramebufferRenderbuffer( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glFramebufferRenderbuffer", 130, file, line );
-    gldlFramebufferRenderbuffer_impl( target, attachment, renderbuffertarget, renderbuffer );
+    int breakpoint = DebugTest( 130 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFramebufferRenderbuffer( target=%s, attachment=%s, renderbuffertarget=%s, renderbuffer=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlFramebufferRenderbuffer_impl( target, attachment, renderbuffertarget, renderbuffer );
 }
 
 void gldlGetFramebufferAttachmentParameteriv ( GLenum target, GLenum attachment, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFramebufferAttachmentParameteriv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetFramebufferAttachmentParameteriv", 174, file, line );
-    gldlGetFramebufferAttachmentParameteriv_impl( target, attachment, pname, params );
+    int breakpoint = DebugTest( 174 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetFramebufferAttachmentParameteriv( target=%s, attachment=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetFramebufferAttachmentParameteriv_impl( target, attachment, pname, params );
 }
 
 void gldlGenerateMipmap ( GLenum target, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenerateMipmap( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glGenerateMipmap", 146, file, line );
-    gldlGenerateMipmap_impl( target );
+    int breakpoint = DebugTest( 146 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenerateMipmap( target=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlGenerateMipmap_impl( target );
 }
 
 void gldlBlitFramebuffer ( GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlitFramebuffer( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,  arg9 );
 
-    DebugTest( "glBlitFramebuffer", 34, file, line );
-    gldlBlitFramebuffer_impl( srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter );
+    int breakpoint = DebugTest( 34 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlitFramebuffer( srcX0=%s, srcY0=%s, srcX1=%s, srcY1=%s, dstX0=%s, dstY0=%s, dstX1=%s, dstY1=%s, mask=%s, filter=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, file, line );
+		DebugFunction();
+	}
+	gldlBlitFramebuffer_impl( srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter );
 }
 
 void gldlRenderbufferStorageMultisample ( GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glRenderbufferStorageMultisample( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glRenderbufferStorageMultisample", 362, file, line );
-    gldlRenderbufferStorageMultisample_impl( target, samples, internalformat, width, height );
+    int breakpoint = DebugTest( 362 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glRenderbufferStorageMultisample( target=%s, samples=%s, internalformat=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlRenderbufferStorageMultisample_impl( target, samples, internalformat, width, height );
 }
 
 void gldlFramebufferTextureLayer ( GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFramebufferTextureLayer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glFramebufferTextureLayer", 135, file, line );
-    gldlFramebufferTextureLayer_impl( target, attachment, texture, level, layer );
+    int breakpoint = DebugTest( 135 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFramebufferTextureLayer( target=%s, attachment=%s, texture=%s, level=%s, layer=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlFramebufferTextureLayer_impl( target, attachment, texture, level, layer );
 }
 
 GLvoid* gldlMapBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMapBufferRange( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glMapBufferRange", 272, file, line );
-    return gldlMapBufferRange_impl( target, offset, length, access );
+    int breakpoint = DebugTest( 272 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMapBufferRange( target=%s, offset=%s, length=%s, access=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	return gldlMapBufferRange_impl( target, offset, length, access );
 }
 
 void gldlFlushMappedBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFlushMappedBufferRange( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glFlushMappedBufferRange", 129, file, line );
-    gldlFlushMappedBufferRange_impl( target, offset, length );
+    int breakpoint = DebugTest( 129 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFlushMappedBufferRange( target=%s, offset=%s, length=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlFlushMappedBufferRange_impl( target, offset, length );
 }
 
 void gldlBindVertexArray ( GLuint array, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindVertexArray( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glBindVertexArray", 20, file, line );
-    gldlBindVertexArray_impl( array );
+    int breakpoint = DebugTest( 20 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindVertexArray( array=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlBindVertexArray_impl( array );
 }
 
 void gldlDeleteVertexArrays ( GLsizei n, const GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteVertexArrays( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteVertexArrays", 89, file, line );
-    gldlDeleteVertexArrays_impl( n, arrays );
+    int breakpoint = DebugTest( 89 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteVertexArrays( n=%s, arrays=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteVertexArrays_impl( n, arrays );
 }
 
 void gldlGenVertexArrays ( GLsizei n, GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenVertexArrays( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenVertexArrays", 145, file, line );
-    gldlGenVertexArrays_impl( n, arrays );
+    int breakpoint = DebugTest( 145 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenVertexArrays( n=%s, arrays=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenVertexArrays_impl( n, arrays );
 }
 
 GLboolean gldlIsVertexArray ( GLuint array, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsVertexArray( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsVertexArray", 267, file, line );
-    return gldlIsVertexArray_impl( array );
+    int breakpoint = DebugTest( 267 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsVertexArray( array=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsVertexArray_impl( array );
 }
 
 void gldlGetUniformIndices ( GLuint program, GLsizei uniformCount, const GLchar* *uniformNames, GLuint *uniformIndices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformIndices( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetUniformIndices", 220, file, line );
-    gldlGetUniformIndices_impl( program, uniformCount, uniformNames, uniformIndices );
+    int breakpoint = DebugTest( 220 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetUniformIndices( program=%s, uniformCount=%s, uniformNames=%s, uniformIndices=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetUniformIndices_impl( program, uniformCount, uniformNames, uniformIndices );
 }
 
 void gldlGetActiveUniformsiv ( GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniformsiv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetActiveUniformsiv", 156, file, line );
-    gldlGetActiveUniformsiv_impl( program, uniformCount, uniformIndices, pname, params );
+    int breakpoint = DebugTest( 156 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveUniformsiv( program=%s, uniformCount=%s, uniformIndices=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveUniformsiv_impl( program, uniformCount, uniformIndices, pname, params );
 }
 
 void gldlGetActiveUniformName ( GLuint program, GLuint uniformIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformName, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniformName( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetActiveUniformName", 155, file, line );
-    gldlGetActiveUniformName_impl( program, uniformIndex, bufSize, length, uniformName );
+    int breakpoint = DebugTest( 155 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveUniformName( program=%s, uniformIndex=%s, bufSize=%s, length=%s, uniformName=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveUniformName_impl( program, uniformIndex, bufSize, length, uniformName );
 }
 
 GLuint gldlGetUniformBlockIndex ( GLuint program, const GLchar *uniformBlockName, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformBlockIndex( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetUniformBlockIndex", 219, file, line );
-    return gldlGetUniformBlockIndex_impl( program, uniformBlockName );
+    int breakpoint = DebugTest( 219 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetUniformBlockIndex( program=%s, uniformBlockName=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlGetUniformBlockIndex_impl( program, uniformBlockName );
 }
 
 void gldlGetActiveUniformBlockiv ( GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniformBlockiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetActiveUniformBlockiv", 154, file, line );
-    gldlGetActiveUniformBlockiv_impl( program, uniformBlockIndex, pname, params );
+    int breakpoint = DebugTest( 154 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveUniformBlockiv( program=%s, uniformBlockIndex=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveUniformBlockiv_impl( program, uniformBlockIndex, pname, params );
 }
 
 void gldlGetActiveUniformBlockName ( GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveUniformBlockName( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetActiveUniformBlockName", 153, file, line );
-    gldlGetActiveUniformBlockName_impl( program, uniformBlockIndex, bufSize, length, uniformBlockName );
+    int breakpoint = DebugTest( 153 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveUniformBlockName( program=%s, uniformBlockIndex=%s, bufSize=%s, length=%s, uniformBlockName=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveUniformBlockName_impl( program, uniformBlockIndex, bufSize, length, uniformBlockName );
 }
 
 void gldlUniformBlockBinding ( GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformBlockBinding( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniformBlockBinding", 448, file, line );
-    gldlUniformBlockBinding_impl( program, uniformBlockIndex, uniformBlockBinding );
+    int breakpoint = DebugTest( 448 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformBlockBinding( program=%s, uniformBlockIndex=%s, uniformBlockBinding=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniformBlockBinding_impl( program, uniformBlockIndex, uniformBlockBinding );
 }
 
 void gldlCopyBufferSubData ( GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCopyBufferSubData( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glCopyBufferSubData", 63, file, line );
-    gldlCopyBufferSubData_impl( readTarget, writeTarget, readOffset, writeOffset, size );
+    int breakpoint = DebugTest( 63 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCopyBufferSubData( readTarget=%s, writeTarget=%s, readOffset=%s, writeOffset=%s, size=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlCopyBufferSubData_impl( readTarget, writeTarget, readOffset, writeOffset, size );
 }
 
 void gldlDrawElementsBaseVertex ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsBaseVertex( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glDrawElementsBaseVertex", 107, file, line );
-    gldlDrawElementsBaseVertex_impl( mode, count, type, indices, basevertex );
+    int breakpoint = DebugTest( 107 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawElementsBaseVertex( mode=%s, count=%s, type=%s, indices=%s, basevertex=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlDrawElementsBaseVertex_impl( mode, count, type, indices, basevertex );
 }
 
 void gldlDrawRangeElementsBaseVertex ( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawRangeElementsBaseVertex( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glDrawRangeElementsBaseVertex", 114, file, line );
-    gldlDrawRangeElementsBaseVertex_impl( mode, start, end, count, type, indices, basevertex );
+    int breakpoint = DebugTest( 114 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawRangeElementsBaseVertex( mode=%s, start=%s, end=%s, count=%s, type=%s, indices=%s, basevertex=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlDrawRangeElementsBaseVertex_impl( mode, start, end, count, type, indices, basevertex );
 }
 
 void gldlDrawElementsInstancedBaseVertex ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei primcount, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseVertex( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glDrawElementsInstancedBaseVertex", 111, file, line );
-    gldlDrawElementsInstancedBaseVertex_impl( mode, count, type, indices, primcount, basevertex );
+    int breakpoint = DebugTest( 111 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawElementsInstancedBaseVertex( mode=%s, count=%s, type=%s, indices=%s, primcount=%s, basevertex=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlDrawElementsInstancedBaseVertex_impl( mode, count, type, indices, primcount, basevertex );
 }
 
 void gldlMultiDrawElementsBaseVertex ( GLenum mode, const GLsizei *count, GLenum type, const GLvoid* *indices, GLsizei primcount, const GLint *basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiDrawElementsBaseVertex( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glMultiDrawElementsBaseVertex", 278, file, line );
-    gldlMultiDrawElementsBaseVertex_impl( mode, count, type, indices, primcount, basevertex );
+    int breakpoint = DebugTest( 278 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiDrawElementsBaseVertex( mode=%s, count=%s, type=%s, indices=%s, primcount=%s, basevertex=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlMultiDrawElementsBaseVertex_impl( mode, count, type, indices, primcount, basevertex );
 }
 
 void gldlProvokingVertex ( GLenum mode, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProvokingVertex( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glProvokingVertex", 355, file, line );
-    gldlProvokingVertex_impl( mode );
+    int breakpoint = DebugTest( 355 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProvokingVertex( mode=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlProvokingVertex_impl( mode );
 }
 
 GLsync gldlFenceSync ( GLenum condition, GLbitfield flags, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glFenceSync( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glFenceSync", 126, file, line );
-    return gldlFenceSync_impl( condition, flags );
+    int breakpoint = DebugTest( 126 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glFenceSync( condition=%s, flags=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlFenceSync_impl( condition, flags );
 }
 
 GLboolean gldlIsSync ( GLsync sync, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsSync( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsSync", 264, file, line );
-    return gldlIsSync_impl( sync );
+    int breakpoint = DebugTest( 264 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsSync( sync=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsSync_impl( sync );
 }
 
 void gldlDeleteSync ( GLsync sync, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteSync( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glDeleteSync", 86, file, line );
-    gldlDeleteSync_impl( sync );
+    int breakpoint = DebugTest( 86 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteSync( sync=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlDeleteSync_impl( sync );
 }
 
 GLenum gldlClientWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClientWaitSync( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glClientWaitSync", 48, file, line );
-    return gldlClientWaitSync_impl( sync, flags, timeout );
+    int breakpoint = DebugTest( 48 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClientWaitSync( sync=%s, flags=%s, timeout=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	return gldlClientWaitSync_impl( sync, flags, timeout );
 }
 
 void gldlWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glWaitSync( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glWaitSync", 559, file, line );
-    gldlWaitSync_impl( sync, flags, timeout );
+    int breakpoint = DebugTest( 559 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glWaitSync( sync=%s, flags=%s, timeout=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlWaitSync_impl( sync, flags, timeout );
 }
 
 void gldlGetInteger64v ( GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetInteger64v( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetInteger64v", 177, file, line );
-    gldlGetInteger64v_impl( pname, params );
+    int breakpoint = DebugTest( 177 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetInteger64v( pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGetInteger64v_impl( pname, params );
 }
 
 void gldlGetSynciv ( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSynciv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetSynciv", 210, file, line );
-    gldlGetSynciv_impl( sync, pname, bufSize, length, values );
+    int breakpoint = DebugTest( 210 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetSynciv( sync=%s, pname=%s, bufSize=%s, length=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetSynciv_impl( sync, pname, bufSize, length, values );
 }
 
 void gldlTexImage2DMultisample ( GLenum target, GLsizei samples, GLint internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexImage2DMultisample( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glTexImage2DMultisample", 397, file, line );
-    gldlTexImage2DMultisample_impl( target, samples, internalformat, width, height, fixedsamplelocations );
+    int breakpoint = DebugTest( 397 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexImage2DMultisample( target=%s, samples=%s, internalformat=%s, width=%s, height=%s, fixedsamplelocations=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlTexImage2DMultisample_impl( target, samples, internalformat, width, height, fixedsamplelocations );
 }
 
 void gldlTexImage3DMultisample ( GLenum target, GLsizei samples, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLboolean fixedsamplelocations, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexImage3DMultisample( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glTexImage3DMultisample", 399, file, line );
-    gldlTexImage3DMultisample_impl( target, samples, internalformat, width, height, depth, fixedsamplelocations );
+    int breakpoint = DebugTest( 399 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexImage3DMultisample( target=%s, samples=%s, internalformat=%s, width=%s, height=%s, depth=%s, fixedsamplelocations=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlTexImage3DMultisample_impl( target, samples, internalformat, width, height, depth, fixedsamplelocations );
 }
 
 void gldlGetMultisamplefv ( GLenum pname, GLuint index, GLfloat *val, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetMultisamplefv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetMultisamplefv", 181, file, line );
-    gldlGetMultisamplefv_impl( pname, index, val );
+    int breakpoint = DebugTest( 181 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetMultisamplefv( pname=%s, index=%s, val=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetMultisamplefv_impl( pname, index, val );
 }
 
 void gldlSampleMaski ( GLuint index, GLbitfield mask, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSampleMaski( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glSampleMaski", 365, file, line );
-    gldlSampleMaski_impl( index, mask );
+    int breakpoint = DebugTest( 365 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSampleMaski( index=%s, mask=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlSampleMaski_impl( index, mask );
 }
 
 void gldlBlendEquationiARB ( GLuint buf, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendEquationiARB( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBlendEquationiARB", 27, file, line );
-    gldlBlendEquationiARB_impl( buf, mode );
+    int breakpoint = DebugTest( 27 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendEquationiARB( buf=%s, mode=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBlendEquationiARB_impl( buf, mode );
 }
 
 void gldlBlendEquationSeparateiARB ( GLuint buf, GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendEquationSeparateiARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glBlendEquationSeparateiARB", 25, file, line );
-    gldlBlendEquationSeparateiARB_impl( buf, modeRGB, modeAlpha );
+    int breakpoint = DebugTest( 25 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendEquationSeparateiARB( buf=%s, modeRGB=%s, modeAlpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlBlendEquationSeparateiARB_impl( buf, modeRGB, modeAlpha );
 }
 
 void gldlBlendFunciARB ( GLuint buf, GLenum src, GLenum dst, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendFunciARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glBlendFunciARB", 33, file, line );
-    gldlBlendFunciARB_impl( buf, src, dst );
+    int breakpoint = DebugTest( 33 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendFunciARB( buf=%s, src=%s, dst=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlBlendFunciARB_impl( buf, src, dst );
 }
 
 void gldlBlendFuncSeparateiARB ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBlendFuncSeparateiARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glBlendFuncSeparateiARB", 31, file, line );
-    gldlBlendFuncSeparateiARB_impl( buf, srcRGB, dstRGB, srcAlpha, dstAlpha );
+    int breakpoint = DebugTest( 31 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBlendFuncSeparateiARB( buf=%s, srcRGB=%s, dstRGB=%s, srcAlpha=%s, dstAlpha=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlBlendFuncSeparateiARB_impl( buf, srcRGB, dstRGB, srcAlpha, dstAlpha );
 }
 
 void gldlMinSampleShadingARB ( GLclampf value, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMinSampleShadingARB( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glMinSampleShadingARB", 275, file, line );
-    gldlMinSampleShadingARB_impl( value );
+    int breakpoint = DebugTest( 275 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMinSampleShadingARB( value=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlMinSampleShadingARB_impl( value );
 }
 
 void gldlNamedStringARB ( GLenum type, GLint namelen, const GLchar *name, GLint stringlen, const GLchar *string, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glNamedStringARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glNamedStringARB", 287, file, line );
-    gldlNamedStringARB_impl( type, namelen, name, stringlen, string );
+    int breakpoint = DebugTest( 287 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glNamedStringARB( type=%s, namelen=%s, name=%s, stringlen=%s, string=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlNamedStringARB_impl( type, namelen, name, stringlen, string );
 }
 
 void gldlDeleteNamedStringARB ( GLint namelen, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteNamedStringARB( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteNamedStringARB", 79, file, line );
-    gldlDeleteNamedStringARB_impl( namelen, name );
+    int breakpoint = DebugTest( 79 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteNamedStringARB( namelen=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteNamedStringARB_impl( namelen, name );
 }
 
 void gldlCompileShaderIncludeARB ( GLuint shader, GLsizei count, const GLchar* *path, const GLint *length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCompileShaderIncludeARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glCompileShaderIncludeARB", 56, file, line );
-    gldlCompileShaderIncludeARB_impl( shader, count, path, length );
+    int breakpoint = DebugTest( 56 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCompileShaderIncludeARB( shader=%s, count=%s, path=%s, length=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlCompileShaderIncludeARB_impl( shader, count, path, length );
 }
 
 GLboolean gldlIsNamedStringARB ( GLint namelen, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsNamedStringARB( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glIsNamedStringARB", 257, file, line );
-    return gldlIsNamedStringARB_impl( namelen, name );
+    int breakpoint = DebugTest( 257 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsNamedStringARB( namelen=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlIsNamedStringARB_impl( namelen, name );
 }
 
 void gldlGetNamedStringARB ( GLint namelen, const GLchar *name, GLsizei bufSize, GLint *stringlen, GLchar *string, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetNamedStringARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetNamedStringARB", 182, file, line );
-    gldlGetNamedStringARB_impl( namelen, name, bufSize, stringlen, string );
+    int breakpoint = DebugTest( 182 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetNamedStringARB( namelen=%s, name=%s, bufSize=%s, stringlen=%s, string=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetNamedStringARB_impl( namelen, name, bufSize, stringlen, string );
 }
 
 void gldlGetNamedStringivARB ( GLint namelen, const GLchar *name, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetNamedStringivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetNamedStringivARB", 183, file, line );
-    gldlGetNamedStringivARB_impl( namelen, name, pname, params );
+    int breakpoint = DebugTest( 183 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetNamedStringivARB( namelen=%s, name=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetNamedStringivARB_impl( namelen, name, pname, params );
 }
 
 void gldlBindFragDataLocationIndexed ( GLuint program, GLuint colorNumber, GLuint index, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindFragDataLocationIndexed( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glBindFragDataLocationIndexed", 12, file, line );
-    gldlBindFragDataLocationIndexed_impl( program, colorNumber, index, name );
+    int breakpoint = DebugTest( 12 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindFragDataLocationIndexed( program=%s, colorNumber=%s, index=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlBindFragDataLocationIndexed_impl( program, colorNumber, index, name );
 }
 
 GLint gldlGetFragDataIndex ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFragDataIndex( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetFragDataIndex", 172, file, line );
-    return gldlGetFragDataIndex_impl( program, name );
+    int breakpoint = DebugTest( 172 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetFragDataIndex( program=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	return gldlGetFragDataIndex_impl( program, name );
 }
 
 void gldlGenSamplers ( GLsizei count, GLuint *samplers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenSamplers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenSamplers", 142, file, line );
-    gldlGenSamplers_impl( count, samplers );
+    int breakpoint = DebugTest( 142 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenSamplers( count=%s, samplers=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenSamplers_impl( count, samplers );
 }
 
 void gldlDeleteSamplers ( GLsizei count, const GLuint *samplers, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteSamplers( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteSamplers", 84, file, line );
-    gldlDeleteSamplers_impl( count, samplers );
+    int breakpoint = DebugTest( 84 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteSamplers( count=%s, samplers=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteSamplers_impl( count, samplers );
 }
 
 GLboolean gldlIsSampler ( GLuint sampler, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsSampler( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsSampler", 262, file, line );
-    return gldlIsSampler_impl( sampler );
+    int breakpoint = DebugTest( 262 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsSampler( sampler=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsSampler_impl( sampler );
 }
 
 void gldlBindSampler ( GLuint unit, GLuint sampler, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindSampler( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBindSampler", 17, file, line );
-    gldlBindSampler_impl( unit, sampler );
+    int breakpoint = DebugTest( 17 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindSampler( unit=%s, sampler=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBindSampler_impl( unit, sampler );
 }
 
 void gldlSamplerParameteri ( GLuint sampler, GLenum pname, GLint param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glSamplerParameteri", 370, file, line );
-    gldlSamplerParameteri_impl( sampler, pname, param );
+    int breakpoint = DebugTest( 370 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSamplerParameteri( sampler=%s, pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlSamplerParameteri_impl( sampler, pname, param );
 }
 
 void gldlSamplerParameteriv ( GLuint sampler, GLenum pname, const GLint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glSamplerParameteriv", 371, file, line );
-    gldlSamplerParameteriv_impl( sampler, pname, param );
+    int breakpoint = DebugTest( 371 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSamplerParameteriv( sampler=%s, pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlSamplerParameteriv_impl( sampler, pname, param );
 }
 
 void gldlSamplerParameterf ( GLuint sampler, GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameterf( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glSamplerParameterf", 368, file, line );
-    gldlSamplerParameterf_impl( sampler, pname, param );
+    int breakpoint = DebugTest( 368 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSamplerParameterf( sampler=%s, pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlSamplerParameterf_impl( sampler, pname, param );
 }
 
 void gldlSamplerParameterfv ( GLuint sampler, GLenum pname, const GLfloat *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glSamplerParameterfv", 369, file, line );
-    gldlSamplerParameterfv_impl( sampler, pname, param );
+    int breakpoint = DebugTest( 369 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSamplerParameterfv( sampler=%s, pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlSamplerParameterfv_impl( sampler, pname, param );
 }
 
 void gldlSamplerParameterIiv ( GLuint sampler, GLenum pname, const GLint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glSamplerParameterIiv", 366, file, line );
-    gldlSamplerParameterIiv_impl( sampler, pname, param );
+    int breakpoint = DebugTest( 366 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSamplerParameterIiv( sampler=%s, pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlSamplerParameterIiv_impl( sampler, pname, param );
 }
 
 void gldlSamplerParameterIuiv ( GLuint sampler, GLenum pname, const GLuint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSamplerParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glSamplerParameterIuiv", 367, file, line );
-    gldlSamplerParameterIuiv_impl( sampler, pname, param );
+    int breakpoint = DebugTest( 367 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSamplerParameterIuiv( sampler=%s, pname=%s, param=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlSamplerParameterIuiv_impl( sampler, pname, param );
 }
 
 void gldlGetSamplerParameteriv ( GLuint sampler, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSamplerParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetSamplerParameteriv", 201, file, line );
-    gldlGetSamplerParameteriv_impl( sampler, pname, params );
+    int breakpoint = DebugTest( 201 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetSamplerParameteriv( sampler=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetSamplerParameteriv_impl( sampler, pname, params );
 }
 
 void gldlGetSamplerParameterIiv ( GLuint sampler, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSamplerParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetSamplerParameterIiv", 198, file, line );
-    gldlGetSamplerParameterIiv_impl( sampler, pname, params );
+    int breakpoint = DebugTest( 198 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetSamplerParameterIiv( sampler=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetSamplerParameterIiv_impl( sampler, pname, params );
 }
 
 void gldlGetSamplerParameterfv ( GLuint sampler, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSamplerParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetSamplerParameterfv", 200, file, line );
-    gldlGetSamplerParameterfv_impl( sampler, pname, params );
+    int breakpoint = DebugTest( 200 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetSamplerParameterfv( sampler=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetSamplerParameterfv_impl( sampler, pname, params );
 }
 
 void gldlGetSamplerParameterIuiv ( GLuint sampler, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSamplerParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetSamplerParameterIuiv", 199, file, line );
-    gldlGetSamplerParameterIuiv_impl( sampler, pname, params );
+    int breakpoint = DebugTest( 199 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetSamplerParameterIuiv( sampler=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetSamplerParameterIuiv_impl( sampler, pname, params );
 }
 
 void gldlQueryCounter ( GLuint id, GLenum target, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glQueryCounter( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glQueryCounter", 356, file, line );
-    gldlQueryCounter_impl( id, target );
+    int breakpoint = DebugTest( 356 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glQueryCounter( id=%s, target=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlQueryCounter_impl( id, target );
 }
 
 void gldlGetQueryObjecti64v ( GLuint id, GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryObjecti64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetQueryObjecti64v", 192, file, line );
-    gldlGetQueryObjecti64v_impl( id, pname, params );
+    int breakpoint = DebugTest( 192 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetQueryObjecti64v( id=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetQueryObjecti64v_impl( id, pname, params );
 }
 
 void gldlGetQueryObjectui64v ( GLuint id, GLenum pname, GLuint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryObjectui64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetQueryObjectui64v", 194, file, line );
-    gldlGetQueryObjectui64v_impl( id, pname, params );
+    int breakpoint = DebugTest( 194 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetQueryObjectui64v( id=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetQueryObjectui64v_impl( id, pname, params );
 }
 
 void gldlVertexP2ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP2ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexP2ui", 549, file, line );
-    gldlVertexP2ui_impl( type, value );
+    int breakpoint = DebugTest( 549 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexP2ui( type=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexP2ui_impl( type, value );
 }
 
 void gldlVertexP2uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP2uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexP2uiv", 550, file, line );
-    gldlVertexP2uiv_impl( type, value );
+    int breakpoint = DebugTest( 550 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexP2uiv( type=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexP2uiv_impl( type, value );
 }
 
 void gldlVertexP3ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexP3ui", 551, file, line );
-    gldlVertexP3ui_impl( type, value );
+    int breakpoint = DebugTest( 551 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexP3ui( type=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexP3ui_impl( type, value );
 }
 
 void gldlVertexP3uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexP3uiv", 552, file, line );
-    gldlVertexP3uiv_impl( type, value );
+    int breakpoint = DebugTest( 552 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexP3uiv( type=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexP3uiv_impl( type, value );
 }
 
 void gldlVertexP4ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP4ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexP4ui", 553, file, line );
-    gldlVertexP4ui_impl( type, value );
+    int breakpoint = DebugTest( 553 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexP4ui( type=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexP4ui_impl( type, value );
 }
 
 void gldlVertexP4uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexP4uiv", 554, file, line );
-    gldlVertexP4uiv_impl( type, value );
+    int breakpoint = DebugTest( 554 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexP4uiv( type=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexP4uiv_impl( type, value );
 }
 
 void gldlTexCoordP1ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP1ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glTexCoordP1ui", 387, file, line );
-    gldlTexCoordP1ui_impl( type, coords );
+    int breakpoint = DebugTest( 387 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexCoordP1ui( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlTexCoordP1ui_impl( type, coords );
 }
 
 void gldlTexCoordP1uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP1uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glTexCoordP1uiv", 388, file, line );
-    gldlTexCoordP1uiv_impl( type, coords );
+    int breakpoint = DebugTest( 388 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexCoordP1uiv( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlTexCoordP1uiv_impl( type, coords );
 }
 
 void gldlTexCoordP2ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP2ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glTexCoordP2ui", 389, file, line );
-    gldlTexCoordP2ui_impl( type, coords );
+    int breakpoint = DebugTest( 389 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexCoordP2ui( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlTexCoordP2ui_impl( type, coords );
 }
 
 void gldlTexCoordP2uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP2uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glTexCoordP2uiv", 390, file, line );
-    gldlTexCoordP2uiv_impl( type, coords );
+    int breakpoint = DebugTest( 390 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexCoordP2uiv( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlTexCoordP2uiv_impl( type, coords );
 }
 
 void gldlTexCoordP3ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glTexCoordP3ui", 391, file, line );
-    gldlTexCoordP3ui_impl( type, coords );
+    int breakpoint = DebugTest( 391 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexCoordP3ui( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlTexCoordP3ui_impl( type, coords );
 }
 
 void gldlTexCoordP3uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glTexCoordP3uiv", 392, file, line );
-    gldlTexCoordP3uiv_impl( type, coords );
+    int breakpoint = DebugTest( 392 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexCoordP3uiv( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlTexCoordP3uiv_impl( type, coords );
 }
 
 void gldlTexCoordP4ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP4ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glTexCoordP4ui", 393, file, line );
-    gldlTexCoordP4ui_impl( type, coords );
+    int breakpoint = DebugTest( 393 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexCoordP4ui( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlTexCoordP4ui_impl( type, coords );
 }
 
 void gldlTexCoordP4uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexCoordP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glTexCoordP4uiv", 394, file, line );
-    gldlTexCoordP4uiv_impl( type, coords );
+    int breakpoint = DebugTest( 394 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexCoordP4uiv( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlTexCoordP4uiv_impl( type, coords );
 }
 
 void gldlMultiTexCoordP1ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP1ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glMultiTexCoordP1ui", 279, file, line );
-    gldlMultiTexCoordP1ui_impl( texture, type, coords );
+    int breakpoint = DebugTest( 279 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiTexCoordP1ui( texture=%s, type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlMultiTexCoordP1ui_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP1uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP1uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glMultiTexCoordP1uiv", 280, file, line );
-    gldlMultiTexCoordP1uiv_impl( texture, type, coords );
+    int breakpoint = DebugTest( 280 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiTexCoordP1uiv( texture=%s, type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlMultiTexCoordP1uiv_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP2ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glMultiTexCoordP2ui", 281, file, line );
-    gldlMultiTexCoordP2ui_impl( texture, type, coords );
+    int breakpoint = DebugTest( 281 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiTexCoordP2ui( texture=%s, type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlMultiTexCoordP2ui_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP2uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP2uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glMultiTexCoordP2uiv", 282, file, line );
-    gldlMultiTexCoordP2uiv_impl( texture, type, coords );
+    int breakpoint = DebugTest( 282 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiTexCoordP2uiv( texture=%s, type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlMultiTexCoordP2uiv_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP3ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP3ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glMultiTexCoordP3ui", 283, file, line );
-    gldlMultiTexCoordP3ui_impl( texture, type, coords );
+    int breakpoint = DebugTest( 283 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiTexCoordP3ui( texture=%s, type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlMultiTexCoordP3ui_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP3uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP3uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glMultiTexCoordP3uiv", 284, file, line );
-    gldlMultiTexCoordP3uiv_impl( texture, type, coords );
+    int breakpoint = DebugTest( 284 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiTexCoordP3uiv( texture=%s, type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlMultiTexCoordP3uiv_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP4ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP4ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glMultiTexCoordP4ui", 285, file, line );
-    gldlMultiTexCoordP4ui_impl( texture, type, coords );
+    int breakpoint = DebugTest( 285 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiTexCoordP4ui( texture=%s, type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlMultiTexCoordP4ui_impl( texture, type, coords );
 }
 
 void gldlMultiTexCoordP4uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMultiTexCoordP4uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glMultiTexCoordP4uiv", 286, file, line );
-    gldlMultiTexCoordP4uiv_impl( texture, type, coords );
+    int breakpoint = DebugTest( 286 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMultiTexCoordP4uiv( texture=%s, type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlMultiTexCoordP4uiv_impl( texture, type, coords );
 }
 
 void gldlNormalP3ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glNormalP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glNormalP3ui", 288, file, line );
-    gldlNormalP3ui_impl( type, coords );
+    int breakpoint = DebugTest( 288 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glNormalP3ui( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlNormalP3ui_impl( type, coords );
 }
 
 void gldlNormalP3uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glNormalP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glNormalP3uiv", 289, file, line );
-    gldlNormalP3uiv_impl( type, coords );
+    int breakpoint = DebugTest( 289 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glNormalP3uiv( type=%s, coords=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlNormalP3uiv_impl( type, coords );
 }
 
 void gldlColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glColorP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glColorP3ui", 51, file, line );
-    gldlColorP3ui_impl( type, color );
+    int breakpoint = DebugTest( 51 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glColorP3ui( type=%s, color=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlColorP3ui_impl( type, color );
 }
 
 void gldlColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glColorP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glColorP3uiv", 52, file, line );
-    gldlColorP3uiv_impl( type, color );
+    int breakpoint = DebugTest( 52 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glColorP3uiv( type=%s, color=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlColorP3uiv_impl( type, color );
 }
 
 void gldlColorP4ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glColorP4ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glColorP4ui", 53, file, line );
-    gldlColorP4ui_impl( type, color );
+    int breakpoint = DebugTest( 53 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glColorP4ui( type=%s, color=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlColorP4ui_impl( type, color );
 }
 
 void gldlColorP4uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glColorP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glColorP4uiv", 54, file, line );
-    gldlColorP4uiv_impl( type, color );
+    int breakpoint = DebugTest( 54 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glColorP4uiv( type=%s, color=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlColorP4uiv_impl( type, color );
 }
 
 void gldlSecondaryColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSecondaryColorP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glSecondaryColorP3ui", 376, file, line );
-    gldlSecondaryColorP3ui_impl( type, color );
+    int breakpoint = DebugTest( 376 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSecondaryColorP3ui( type=%s, color=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlSecondaryColorP3ui_impl( type, color );
 }
 
 void gldlSecondaryColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glSecondaryColorP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glSecondaryColorP3uiv", 377, file, line );
-    gldlSecondaryColorP3uiv_impl( type, color );
+    int breakpoint = DebugTest( 377 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glSecondaryColorP3uiv( type=%s, color=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlSecondaryColorP3uiv_impl( type, color );
 }
 
 void gldlVertexAttribP1ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP1ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribP1ui", 540, file, line );
-    gldlVertexAttribP1ui_impl( index, type, normalized, value );
+    int breakpoint = DebugTest( 540 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribP1ui( index=%s, type=%s, normalized=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribP1ui_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP1uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP1uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribP1uiv", 541, file, line );
-    gldlVertexAttribP1uiv_impl( index, type, normalized, value );
+    int breakpoint = DebugTest( 541 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribP1uiv( index=%s, type=%s, normalized=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribP1uiv_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP2ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP2ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribP2ui", 542, file, line );
-    gldlVertexAttribP2ui_impl( index, type, normalized, value );
+    int breakpoint = DebugTest( 542 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribP2ui( index=%s, type=%s, normalized=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribP2ui_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP2uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP2uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribP2uiv", 543, file, line );
-    gldlVertexAttribP2uiv_impl( index, type, normalized, value );
+    int breakpoint = DebugTest( 543 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribP2uiv( index=%s, type=%s, normalized=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribP2uiv_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP3ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribP3ui", 544, file, line );
-    gldlVertexAttribP3ui_impl( index, type, normalized, value );
+    int breakpoint = DebugTest( 544 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribP3ui( index=%s, type=%s, normalized=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribP3ui_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP3uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP3uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribP3uiv", 545, file, line );
-    gldlVertexAttribP3uiv_impl( index, type, normalized, value );
+    int breakpoint = DebugTest( 545 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribP3uiv( index=%s, type=%s, normalized=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribP3uiv_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP4ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP4ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribP4ui", 546, file, line );
-    gldlVertexAttribP4ui_impl( index, type, normalized, value );
+    int breakpoint = DebugTest( 546 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribP4ui( index=%s, type=%s, normalized=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribP4ui_impl( index, type, normalized, value );
 }
 
 void gldlVertexAttribP4uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribP4uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribP4uiv", 547, file, line );
-    gldlVertexAttribP4uiv_impl( index, type, normalized, value );
+    int breakpoint = DebugTest( 547 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribP4uiv( index=%s, type=%s, normalized=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribP4uiv_impl( index, type, normalized, value );
 }
 
 void gldlDrawArraysIndirect ( GLenum mode, const GLvoid *indirect, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawArraysIndirect( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDrawArraysIndirect", 101, file, line );
-    gldlDrawArraysIndirect_impl( mode, indirect );
+    int breakpoint = DebugTest( 101 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawArraysIndirect( mode=%s, indirect=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDrawArraysIndirect_impl( mode, indirect );
 }
 
 void gldlDrawElementsIndirect ( GLenum mode, GLenum type, const GLvoid *indirect, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsIndirect( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glDrawElementsIndirect", 108, file, line );
-    gldlDrawElementsIndirect_impl( mode, type, indirect );
+    int breakpoint = DebugTest( 108 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawElementsIndirect( mode=%s, type=%s, indirect=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlDrawElementsIndirect_impl( mode, type, indirect );
 }
 
 void gldlUniform1d ( GLint location, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1d( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glUniform1d", 416, file, line );
-    gldlUniform1d_impl( location, x );
+    int breakpoint = DebugTest( 416 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform1d( location=%s, x=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlUniform1d_impl( location, x );
 }
 
 void gldlUniform2d ( GLint location, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform2d", 424, file, line );
-    gldlUniform2d_impl( location, x, y );
+    int breakpoint = DebugTest( 424 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform2d( location=%s, x=%s, y=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform2d_impl( location, x, y );
 }
 
 void gldlUniform3d ( GLint location, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniform3d", 432, file, line );
-    gldlUniform3d_impl( location, x, y, z );
+    int breakpoint = DebugTest( 432 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform3d( location=%s, x=%s, y=%s, z=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniform3d_impl( location, x, y, z );
 }
 
 void gldlUniform4d ( GLint location, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glUniform4d", 440, file, line );
-    gldlUniform4d_impl( location, x, y, z, w );
+    int breakpoint = DebugTest( 440 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform4d( location=%s, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlUniform4d_impl( location, x, y, z, w );
 }
 
 void gldlUniform1dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform1dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform1dv", 417, file, line );
-    gldlUniform1dv_impl( location, count, value );
+    int breakpoint = DebugTest( 417 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform1dv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform1dv_impl( location, count, value );
 }
 
 void gldlUniform2dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform2dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform2dv", 425, file, line );
-    gldlUniform2dv_impl( location, count, value );
+    int breakpoint = DebugTest( 425 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform2dv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform2dv_impl( location, count, value );
 }
 
 void gldlUniform3dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform3dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform3dv", 433, file, line );
-    gldlUniform3dv_impl( location, count, value );
+    int breakpoint = DebugTest( 433 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform3dv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform3dv_impl( location, count, value );
 }
 
 void gldlUniform4dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniform4dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniform4dv", 441, file, line );
-    gldlUniform4dv_impl( location, count, value );
+    int breakpoint = DebugTest( 441 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniform4dv( location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniform4dv_impl( location, count, value );
 }
 
 void gldlUniformMatrix2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix2dv", 449, file, line );
-    gldlUniformMatrix2dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 449 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix2dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix2dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix3dv", 455, file, line );
-    gldlUniformMatrix3dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 455 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix3dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix3dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix4dv", 461, file, line );
-    gldlUniformMatrix4dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 461 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix4dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix4dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix2x3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2x3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix2x3dv", 451, file, line );
-    gldlUniformMatrix2x3dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 451 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix2x3dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix2x3dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix2x4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix2x4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix2x4dv", 453, file, line );
-    gldlUniformMatrix2x4dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 453 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix2x4dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix2x4dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3x2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3x2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix3x2dv", 457, file, line );
-    gldlUniformMatrix3x2dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 457 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix3x2dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix3x2dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix3x4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix3x4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix3x4dv", 459, file, line );
-    gldlUniformMatrix3x4dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 459 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix3x4dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix3x4dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4x2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4x2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix4x2dv", 463, file, line );
-    gldlUniformMatrix4x2dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 463 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix4x2dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix4x2dv_impl( location, count, transpose, value );
 }
 
 void gldlUniformMatrix4x3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformMatrix4x3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glUniformMatrix4x3dv", 465, file, line );
-    gldlUniformMatrix4x3dv_impl( location, count, transpose, value );
+    int breakpoint = DebugTest( 465 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformMatrix4x3dv( location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlUniformMatrix4x3dv_impl( location, count, transpose, value );
 }
 
 void gldlGetUniformdv ( GLuint program, GLint location, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetUniformdv", 223, file, line );
-    gldlGetUniformdv_impl( program, location, params );
+    int breakpoint = DebugTest( 223 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetUniformdv( program=%s, location=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetUniformdv_impl( program, location, params );
 }
 
 GLint gldlGetSubroutineUniformLocation ( GLuint program, GLenum shadertype, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSubroutineUniformLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetSubroutineUniformLocation", 209, file, line );
-    return gldlGetSubroutineUniformLocation_impl( program, shadertype, name );
+    int breakpoint = DebugTest( 209 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetSubroutineUniformLocation( program=%s, shadertype=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	return gldlGetSubroutineUniformLocation_impl( program, shadertype, name );
 }
 
 GLuint gldlGetSubroutineIndex ( GLuint program, GLenum shadertype, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetSubroutineIndex( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetSubroutineIndex", 208, file, line );
-    return gldlGetSubroutineIndex_impl( program, shadertype, name );
+    int breakpoint = DebugTest( 208 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetSubroutineIndex( program=%s, shadertype=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	return gldlGetSubroutineIndex_impl( program, shadertype, name );
 }
 
 void gldlGetActiveSubroutineUniformiv ( GLuint program, GLenum shadertype, GLuint index, GLenum pname, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineUniformiv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetActiveSubroutineUniformiv", 151, file, line );
-    gldlGetActiveSubroutineUniformiv_impl( program, shadertype, index, pname, values );
+    int breakpoint = DebugTest( 151 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveSubroutineUniformiv( program=%s, shadertype=%s, index=%s, pname=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveSubroutineUniformiv_impl( program, shadertype, index, pname, values );
 }
 
 void gldlGetActiveSubroutineUniformName ( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineUniformName( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glGetActiveSubroutineUniformName", 150, file, line );
-    gldlGetActiveSubroutineUniformName_impl( program, shadertype, index, bufsize, length, name );
+    int breakpoint = DebugTest( 150 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveSubroutineUniformName( program=%s, shadertype=%s, index=%s, bufsize=%s, length=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveSubroutineUniformName_impl( program, shadertype, index, bufsize, length, name );
 }
 
 void gldlGetActiveSubroutineName ( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineName( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glGetActiveSubroutineName", 149, file, line );
-    gldlGetActiveSubroutineName_impl( program, shadertype, index, bufsize, length, name );
+    int breakpoint = DebugTest( 149 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveSubroutineName( program=%s, shadertype=%s, index=%s, bufsize=%s, length=%s, name=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveSubroutineName_impl( program, shadertype, index, bufsize, length, name );
 }
 
 void gldlUniformSubroutinesuiv ( GLenum shadertype, GLsizei count, const GLuint *indices, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUniformSubroutinesuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUniformSubroutinesuiv", 467, file, line );
-    gldlUniformSubroutinesuiv_impl( shadertype, count, indices );
+    int breakpoint = DebugTest( 467 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUniformSubroutinesuiv( shadertype=%s, count=%s, indices=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUniformSubroutinesuiv_impl( shadertype, count, indices );
 }
 
 void gldlGetUniformSubroutineuiv ( GLenum shadertype, GLint location, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetUniformSubroutineuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetUniformSubroutineuiv", 222, file, line );
-    gldlGetUniformSubroutineuiv_impl( shadertype, location, params );
+    int breakpoint = DebugTest( 222 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetUniformSubroutineuiv( shadertype=%s, location=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetUniformSubroutineuiv_impl( shadertype, location, params );
 }
 
 void gldlGetProgramStageiv ( GLuint program, GLenum shadertype, GLenum pname, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramStageiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetProgramStageiv", 189, file, line );
-    gldlGetProgramStageiv_impl( program, shadertype, pname, values );
+    int breakpoint = DebugTest( 189 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetProgramStageiv( program=%s, shadertype=%s, pname=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetProgramStageiv_impl( program, shadertype, pname, values );
 }
 
 void gldlPatchParameteri ( GLenum pname, GLint value, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPatchParameteri( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPatchParameteri", 291, file, line );
-    gldlPatchParameteri_impl( pname, value );
+    int breakpoint = DebugTest( 291 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPatchParameteri( pname=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPatchParameteri_impl( pname, value );
 }
 
 void gldlPatchParameterfv ( GLenum pname, const GLfloat *values, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPatchParameterfv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glPatchParameterfv", 290, file, line );
-    gldlPatchParameterfv_impl( pname, values );
+    int breakpoint = DebugTest( 290 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPatchParameterfv( pname=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlPatchParameterfv_impl( pname, values );
 }
 
 void gldlBindTransformFeedback ( GLenum target, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindTransformFeedback( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glBindTransformFeedback", 19, file, line );
-    gldlBindTransformFeedback_impl( target, id );
+    int breakpoint = DebugTest( 19 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindTransformFeedback( target=%s, id=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlBindTransformFeedback_impl( target, id );
 }
 
 void gldlDeleteTransformFeedbacks ( GLsizei n, const GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteTransformFeedbacks( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteTransformFeedbacks", 88, file, line );
-    gldlDeleteTransformFeedbacks_impl( n, ids );
+    int breakpoint = DebugTest( 88 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteTransformFeedbacks( n=%s, ids=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteTransformFeedbacks_impl( n, ids );
 }
 
 void gldlGenTransformFeedbacks ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenTransformFeedbacks( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenTransformFeedbacks", 144, file, line );
-    gldlGenTransformFeedbacks_impl( n, ids );
+    int breakpoint = DebugTest( 144 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenTransformFeedbacks( n=%s, ids=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenTransformFeedbacks_impl( n, ids );
 }
 
 GLboolean gldlIsTransformFeedback ( GLuint id, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsTransformFeedback( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsTransformFeedback", 266, file, line );
-    return gldlIsTransformFeedback_impl( id );
+    int breakpoint = DebugTest( 266 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsTransformFeedback( id=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsTransformFeedback_impl( id );
 }
 
 void gldlPauseTransformFeedback ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glPauseTransformFeedback();\n", file, line );
 
-    DebugTest( "glPauseTransformFeedback", 292, file, line );
-    gldlPauseTransformFeedback_impl(  );
+    int breakpoint = DebugTest( 292 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glPauseTransformFeedback( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	gldlPauseTransformFeedback_impl(  );
 }
 
 void gldlResumeTransformFeedback ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glResumeTransformFeedback();\n", file, line );
 
-    DebugTest( "glResumeTransformFeedback", 363, file, line );
-    gldlResumeTransformFeedback_impl(  );
+    int breakpoint = DebugTest( 363 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glResumeTransformFeedback( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	gldlResumeTransformFeedback_impl(  );
 }
 
 void gldlDrawTransformFeedback ( GLenum mode, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawTransformFeedback( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDrawTransformFeedback", 115, file, line );
-    gldlDrawTransformFeedback_impl( mode, id );
+    int breakpoint = DebugTest( 115 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawTransformFeedback( mode=%s, id=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDrawTransformFeedback_impl( mode, id );
 }
 
 void gldlDrawTransformFeedbackStream ( GLenum mode, GLuint id, GLuint stream, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawTransformFeedbackStream( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glDrawTransformFeedbackStream", 117, file, line );
-    gldlDrawTransformFeedbackStream_impl( mode, id, stream );
+    int breakpoint = DebugTest( 117 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawTransformFeedbackStream( mode=%s, id=%s, stream=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlDrawTransformFeedbackStream_impl( mode, id, stream );
 }
 
 void gldlBeginQueryIndexed ( GLenum target, GLuint index, GLuint id, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBeginQueryIndexed( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glBeginQueryIndexed", 5, file, line );
-    gldlBeginQueryIndexed_impl( target, index, id );
+    int breakpoint = DebugTest( 5 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBeginQueryIndexed( target=%s, index=%s, id=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlBeginQueryIndexed_impl( target, index, id );
 }
 
 void gldlEndQueryIndexed ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glEndQueryIndexed( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glEndQueryIndexed", 124, file, line );
-    gldlEndQueryIndexed_impl( target, index );
+    int breakpoint = DebugTest( 124 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glEndQueryIndexed( target=%s, index=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlEndQueryIndexed_impl( target, index );
 }
 
 void gldlGetQueryIndexediv ( GLenum target, GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetQueryIndexediv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetQueryIndexediv", 191, file, line );
-    gldlGetQueryIndexediv_impl( target, index, pname, params );
+    int breakpoint = DebugTest( 191 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetQueryIndexediv( target=%s, index=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetQueryIndexediv_impl( target, index, pname, params );
 }
 
 void gldlReleaseShaderCompiler ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glReleaseShaderCompiler();\n", file, line );
 
-    DebugTest( "glReleaseShaderCompiler", 360, file, line );
-    gldlReleaseShaderCompiler_impl(  );
+    int breakpoint = DebugTest( 360 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glReleaseShaderCompiler( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	gldlReleaseShaderCompiler_impl(  );
 }
 
 void gldlShaderBinary ( GLsizei count, const GLuint *shaders, GLenum binaryformat, const GLvoid *binary, GLsizei length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glShaderBinary( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glShaderBinary", 378, file, line );
-    gldlShaderBinary_impl( count, shaders, binaryformat, binary, length );
+    int breakpoint = DebugTest( 378 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glShaderBinary( count=%s, shaders=%s, binaryformat=%s, binary=%s, length=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlShaderBinary_impl( count, shaders, binaryformat, binary, length );
 }
 
 void gldlGetShaderPrecisionFormat ( GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetShaderPrecisionFormat( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetShaderPrecisionFormat", 203, file, line );
-    gldlGetShaderPrecisionFormat_impl( shadertype, precisiontype, range, precision );
+    int breakpoint = DebugTest( 203 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetShaderPrecisionFormat( shadertype=%s, precisiontype=%s, range=%s, precision=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetShaderPrecisionFormat_impl( shadertype, precisiontype, range, precision );
 }
 
 void gldlDepthRangef ( GLclampf n, GLclampf f, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDepthRangef( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDepthRangef", 95, file, line );
-    gldlDepthRangef_impl( n, f );
+    int breakpoint = DebugTest( 95 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDepthRangef( n=%s, f=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDepthRangef_impl( n, f );
 }
 
 void gldlClearDepthf ( GLclampf d, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glClearDepthf( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glClearDepthf", 46, file, line );
-    gldlClearDepthf_impl( d );
+    int breakpoint = DebugTest( 46 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glClearDepthf( d=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlClearDepthf_impl( d );
 }
 
 void gldlGetProgramBinary ( GLuint program, GLsizei bufSize, GLsizei *length, GLenum *binaryFormat, GLvoid *binary, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramBinary( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetProgramBinary", 185, file, line );
-    gldlGetProgramBinary_impl( program, bufSize, length, binaryFormat, binary );
+    int breakpoint = DebugTest( 185 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetProgramBinary( program=%s, bufSize=%s, length=%s, binaryFormat=%s, binary=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetProgramBinary_impl( program, bufSize, length, binaryFormat, binary );
 }
 
 void gldlProgramBinary ( GLuint program, GLenum binaryFormat, const GLvoid *binary, GLsizei length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramBinary( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramBinary", 303, file, line );
-    gldlProgramBinary_impl( program, binaryFormat, binary, length );
+    int breakpoint = DebugTest( 303 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramBinary( program=%s, binaryFormat=%s, binary=%s, length=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramBinary_impl( program, binaryFormat, binary, length );
 }
 
 void gldlProgramParameteri ( GLuint program, GLenum pname, GLint value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glProgramParameteri", 304, file, line );
-    gldlProgramParameteri_impl( program, pname, value );
+    int breakpoint = DebugTest( 304 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramParameteri( program=%s, pname=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlProgramParameteri_impl( program, pname, value );
 }
 
 void gldlUseProgramStages ( GLuint pipeline, GLbitfield stages, GLuint program, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glUseProgramStages( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glUseProgramStages", 470, file, line );
-    gldlUseProgramStages_impl( pipeline, stages, program );
+    int breakpoint = DebugTest( 470 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glUseProgramStages( pipeline=%s, stages=%s, program=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlUseProgramStages_impl( pipeline, stages, program );
 }
 
 void gldlActiveShaderProgram ( GLuint pipeline, GLuint program, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glActiveShaderProgram( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glActiveShaderProgram", 0, file, line );
-    gldlActiveShaderProgram_impl( pipeline, program );
+    int breakpoint = DebugTest( 0 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glActiveShaderProgram( pipeline=%s, program=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlActiveShaderProgram_impl( pipeline, program );
 }
 
 GLuint gldlCreateShaderProgramv ( GLenum type, GLsizei count, const GLchar* *strings, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCreateShaderProgramv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glCreateShaderProgramv", 71, file, line );
-    return gldlCreateShaderProgramv_impl( type, count, strings );
+    int breakpoint = DebugTest( 71 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCreateShaderProgramv( type=%s, count=%s, strings=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	return gldlCreateShaderProgramv_impl( type, count, strings );
 }
 
 void gldlBindProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindProgramPipeline( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glBindProgramPipeline", 15, file, line );
-    gldlBindProgramPipeline_impl( pipeline );
+    int breakpoint = DebugTest( 15 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindProgramPipeline( pipeline=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlBindProgramPipeline_impl( pipeline );
 }
 
 void gldlDeleteProgramPipelines ( GLsizei n, const GLuint *pipelines, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDeleteProgramPipelines( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDeleteProgramPipelines", 81, file, line );
-    gldlDeleteProgramPipelines_impl( n, pipelines );
+    int breakpoint = DebugTest( 81 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDeleteProgramPipelines( n=%s, pipelines=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDeleteProgramPipelines_impl( n, pipelines );
 }
 
 void gldlGenProgramPipelines ( GLsizei n, GLuint *pipelines, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGenProgramPipelines( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGenProgramPipelines", 139, file, line );
-    gldlGenProgramPipelines_impl( n, pipelines );
+    int breakpoint = DebugTest( 139 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGenProgramPipelines( n=%s, pipelines=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGenProgramPipelines_impl( n, pipelines );
 }
 
 GLboolean gldlIsProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glIsProgramPipeline( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glIsProgramPipeline", 259, file, line );
-    return gldlIsProgramPipeline_impl( pipeline );
+    int breakpoint = DebugTest( 259 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glIsProgramPipeline( pipeline=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	return gldlIsProgramPipeline_impl( pipeline );
 }
 
 void gldlGetProgramPipelineiv ( GLuint pipeline, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramPipelineiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetProgramPipelineiv", 188, file, line );
-    gldlGetProgramPipelineiv_impl( pipeline, pname, params );
+    int breakpoint = DebugTest( 188 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetProgramPipelineiv( pipeline=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetProgramPipelineiv_impl( pipeline, pname, params );
 }
 
 void gldlProgramUniform1i ( GLuint program, GLint location, GLint v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glProgramUniform1i", 309, file, line );
-    gldlProgramUniform1i_impl( program, location, v0 );
+    int breakpoint = DebugTest( 309 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform1i( program=%s, location=%s, v0=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform1i_impl( program, location, v0 );
 }
 
 void gldlProgramUniform1iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform1iv", 310, file, line );
-    gldlProgramUniform1iv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 310 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform1iv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform1iv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform1f ( GLuint program, GLint location, GLfloat v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glProgramUniform1f", 307, file, line );
-    gldlProgramUniform1f_impl( program, location, v0 );
+    int breakpoint = DebugTest( 307 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform1f( program=%s, location=%s, v0=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform1f_impl( program, location, v0 );
 }
 
 void gldlProgramUniform1fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform1fv", 308, file, line );
-    gldlProgramUniform1fv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 308 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform1fv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform1fv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform1d ( GLuint program, GLint location, GLdouble v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glProgramUniform1d", 305, file, line );
-    gldlProgramUniform1d_impl( program, location, v0 );
+    int breakpoint = DebugTest( 305 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform1d( program=%s, location=%s, v0=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform1d_impl( program, location, v0 );
 }
 
 void gldlProgramUniform1dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform1dv", 306, file, line );
-    gldlProgramUniform1dv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 306 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform1dv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform1dv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform1ui ( GLuint program, GLint location, GLuint v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glProgramUniform1ui", 311, file, line );
-    gldlProgramUniform1ui_impl( program, location, v0 );
+    int breakpoint = DebugTest( 311 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform1ui( program=%s, location=%s, v0=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform1ui_impl( program, location, v0 );
 }
 
 void gldlProgramUniform1uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform1uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform1uiv", 312, file, line );
-    gldlProgramUniform1uiv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 312 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform1uiv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform1uiv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform2i ( GLuint program, GLint location, GLint v0, GLint v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform2i", 317, file, line );
-    gldlProgramUniform2i_impl( program, location, v0, v1 );
+    int breakpoint = DebugTest( 317 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform2i( program=%s, location=%s, v0=%s, v1=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform2i_impl( program, location, v0, v1 );
 }
 
 void gldlProgramUniform2iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform2iv", 318, file, line );
-    gldlProgramUniform2iv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 318 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform2iv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform2iv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform2f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform2f", 315, file, line );
-    gldlProgramUniform2f_impl( program, location, v0, v1 );
+    int breakpoint = DebugTest( 315 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform2f( program=%s, location=%s, v0=%s, v1=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform2f_impl( program, location, v0, v1 );
 }
 
 void gldlProgramUniform2fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform2fv", 316, file, line );
-    gldlProgramUniform2fv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 316 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform2fv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform2fv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform2d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform2d", 313, file, line );
-    gldlProgramUniform2d_impl( program, location, v0, v1 );
+    int breakpoint = DebugTest( 313 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform2d( program=%s, location=%s, v0=%s, v1=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform2d_impl( program, location, v0, v1 );
 }
 
 void gldlProgramUniform2dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform2dv", 314, file, line );
-    gldlProgramUniform2dv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 314 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform2dv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform2dv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform2ui ( GLuint program, GLint location, GLuint v0, GLuint v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform2ui", 319, file, line );
-    gldlProgramUniform2ui_impl( program, location, v0, v1 );
+    int breakpoint = DebugTest( 319 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform2ui( program=%s, location=%s, v0=%s, v1=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform2ui_impl( program, location, v0, v1 );
 }
 
 void gldlProgramUniform2uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform2uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform2uiv", 320, file, line );
-    gldlProgramUniform2uiv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 320 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform2uiv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform2uiv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform3i ( GLuint program, GLint location, GLint v0, GLint v1, GLint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniform3i", 325, file, line );
-    gldlProgramUniform3i_impl( program, location, v0, v1, v2 );
+    int breakpoint = DebugTest( 325 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform3i( program=%s, location=%s, v0=%s, v1=%s, v2=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform3i_impl( program, location, v0, v1, v2 );
 }
 
 void gldlProgramUniform3iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform3iv", 326, file, line );
-    gldlProgramUniform3iv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 326 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform3iv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform3iv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform3f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniform3f", 323, file, line );
-    gldlProgramUniform3f_impl( program, location, v0, v1, v2 );
+    int breakpoint = DebugTest( 323 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform3f( program=%s, location=%s, v0=%s, v1=%s, v2=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform3f_impl( program, location, v0, v1, v2 );
 }
 
 void gldlProgramUniform3fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform3fv", 324, file, line );
-    gldlProgramUniform3fv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 324 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform3fv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform3fv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform3d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, GLdouble v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniform3d", 321, file, line );
-    gldlProgramUniform3d_impl( program, location, v0, v1, v2 );
+    int breakpoint = DebugTest( 321 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform3d( program=%s, location=%s, v0=%s, v1=%s, v2=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform3d_impl( program, location, v0, v1, v2 );
 }
 
 void gldlProgramUniform3dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform3dv", 322, file, line );
-    gldlProgramUniform3dv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 322 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform3dv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform3dv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform3ui ( GLuint program, GLint location, GLuint v0, GLuint v1, GLuint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniform3ui", 327, file, line );
-    gldlProgramUniform3ui_impl( program, location, v0, v1, v2 );
+    int breakpoint = DebugTest( 327 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform3ui( program=%s, location=%s, v0=%s, v1=%s, v2=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform3ui_impl( program, location, v0, v1, v2 );
 }
 
 void gldlProgramUniform3uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform3uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform3uiv", 328, file, line );
-    gldlProgramUniform3uiv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 328 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform3uiv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform3uiv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform4i ( GLuint program, GLint location, GLint v0, GLint v1, GLint v2, GLint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4i( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glProgramUniform4i", 333, file, line );
-    gldlProgramUniform4i_impl( program, location, v0, v1, v2, v3 );
+    int breakpoint = DebugTest( 333 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform4i( program=%s, location=%s, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform4i_impl( program, location, v0, v1, v2, v3 );
 }
 
 void gldlProgramUniform4iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform4iv", 334, file, line );
-    gldlProgramUniform4iv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 334 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform4iv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform4iv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform4f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4f( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glProgramUniform4f", 331, file, line );
-    gldlProgramUniform4f_impl( program, location, v0, v1, v2, v3 );
+    int breakpoint = DebugTest( 331 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform4f( program=%s, location=%s, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform4f_impl( program, location, v0, v1, v2, v3 );
 }
 
 void gldlProgramUniform4fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform4fv", 332, file, line );
-    gldlProgramUniform4fv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 332 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform4fv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform4fv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform4d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, GLdouble v2, GLdouble v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4d( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glProgramUniform4d", 329, file, line );
-    gldlProgramUniform4d_impl( program, location, v0, v1, v2, v3 );
+    int breakpoint = DebugTest( 329 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform4d( program=%s, location=%s, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform4d_impl( program, location, v0, v1, v2, v3 );
 }
 
 void gldlProgramUniform4dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform4dv", 330, file, line );
-    gldlProgramUniform4dv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 330 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform4dv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform4dv_impl( program, location, count, value );
 }
 
 void gldlProgramUniform4ui ( GLuint program, GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4ui( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glProgramUniform4ui", 335, file, line );
-    gldlProgramUniform4ui_impl( program, location, v0, v1, v2, v3 );
+    int breakpoint = DebugTest( 335 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform4ui( program=%s, location=%s, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform4ui_impl( program, location, v0, v1, v2, v3 );
 }
 
 void gldlProgramUniform4uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniform4uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glProgramUniform4uiv", 336, file, line );
-    gldlProgramUniform4uiv_impl( program, location, count, value );
+    int breakpoint = DebugTest( 336 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniform4uiv( program=%s, location=%s, count=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniform4uiv_impl( program, location, count, value );
 }
 
 void gldlProgramUniformMatrix2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix2fv", 338, file, line );
-    gldlProgramUniformMatrix2fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 338 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix2fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix2fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix3fv", 344, file, line );
-    gldlProgramUniformMatrix3fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 344 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix3fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix3fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix4fv", 350, file, line );
-    gldlProgramUniformMatrix4fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 350 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix4fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix4fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix2dv", 337, file, line );
-    gldlProgramUniformMatrix2dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 337 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix2dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix2dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix3dv", 343, file, line );
-    gldlProgramUniformMatrix3dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 343 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix3dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix3dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix4dv", 349, file, line );
-    gldlProgramUniformMatrix4dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 349 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix4dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix4dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2x3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix2x3fv", 340, file, line );
-    gldlProgramUniformMatrix2x3fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 340 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix2x3fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix2x3fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3x2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix3x2fv", 346, file, line );
-    gldlProgramUniformMatrix3x2fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 346 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix3x2fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix3x2fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2x4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix2x4fv", 342, file, line );
-    gldlProgramUniformMatrix2x4fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 342 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix2x4fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix2x4fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4x2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix4x2fv", 352, file, line );
-    gldlProgramUniformMatrix4x2fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 352 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix4x2fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix4x2fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3x4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix3x4fv", 348, file, line );
-    gldlProgramUniformMatrix3x4fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 348 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix3x4fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix3x4fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4x3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix4x3fv", 354, file, line );
-    gldlProgramUniformMatrix4x3fv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 354 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix4x3fv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix4x3fv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2x3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix2x3dv", 339, file, line );
-    gldlProgramUniformMatrix2x3dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 339 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix2x3dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix2x3dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3x2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix3x2dv", 345, file, line );
-    gldlProgramUniformMatrix3x2dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 345 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix3x2dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix3x2dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix2x4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix2x4dv", 341, file, line );
-    gldlProgramUniformMatrix2x4dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 341 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix2x4dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix2x4dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4x2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix4x2dv", 351, file, line );
-    gldlProgramUniformMatrix4x2dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 351 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix4x2dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix4x2dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix3x4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix3x4dv", 347, file, line );
-    gldlProgramUniformMatrix3x4dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 347 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix3x4dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix3x4dv_impl( program, location, count, transpose, value );
 }
 
 void gldlProgramUniformMatrix4x3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glProgramUniformMatrix4x3dv", 353, file, line );
-    gldlProgramUniformMatrix4x3dv_impl( program, location, count, transpose, value );
+    int breakpoint = DebugTest( 353 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glProgramUniformMatrix4x3dv( program=%s, location=%s, count=%s, transpose=%s, value=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlProgramUniformMatrix4x3dv_impl( program, location, count, transpose, value );
 }
 
 void gldlValidateProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glValidateProgramPipeline( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glValidateProgramPipeline", 472, file, line );
-    gldlValidateProgramPipeline_impl( pipeline );
+    int breakpoint = DebugTest( 472 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glValidateProgramPipeline( pipeline=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlValidateProgramPipeline_impl( pipeline );
 }
 
 void gldlGetProgramPipelineInfoLog ( GLuint pipeline, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetProgramPipelineInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetProgramPipelineInfoLog", 187, file, line );
-    gldlGetProgramPipelineInfoLog_impl( pipeline, bufSize, length, infoLog );
+    int breakpoint = DebugTest( 187 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetProgramPipelineInfoLog( pipeline=%s, bufSize=%s, length=%s, infoLog=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetProgramPipelineInfoLog_impl( pipeline, bufSize, length, infoLog );
 }
 
 void gldlVertexAttribL1d ( GLuint index, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL1d( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribL1d", 531, file, line );
-    gldlVertexAttribL1d_impl( index, x );
+    int breakpoint = DebugTest( 531 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribL1d( index=%s, x=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribL1d_impl( index, x );
 }
 
 void gldlVertexAttribL2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glVertexAttribL2d", 533, file, line );
-    gldlVertexAttribL2d_impl( index, x, y );
+    int breakpoint = DebugTest( 533 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribL2d( index=%s, x=%s, y=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribL2d_impl( index, x, y );
 }
 
 void gldlVertexAttribL3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glVertexAttribL3d", 535, file, line );
-    gldlVertexAttribL3d_impl( index, x, y, z );
+    int breakpoint = DebugTest( 535 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribL3d( index=%s, x=%s, y=%s, z=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribL3d_impl( index, x, y, z );
 }
 
 void gldlVertexAttribL4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttribL4d", 537, file, line );
-    gldlVertexAttribL4d_impl( index, x, y, z, w );
+    int breakpoint = DebugTest( 537 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribL4d( index=%s, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribL4d_impl( index, x, y, z, w );
 }
 
 void gldlVertexAttribL1dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL1dv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribL1dv", 532, file, line );
-    gldlVertexAttribL1dv_impl( index, v );
+    int breakpoint = DebugTest( 532 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribL1dv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribL1dv_impl( index, v );
 }
 
 void gldlVertexAttribL2dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL2dv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribL2dv", 534, file, line );
-    gldlVertexAttribL2dv_impl( index, v );
+    int breakpoint = DebugTest( 534 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribL2dv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribL2dv_impl( index, v );
 }
 
 void gldlVertexAttribL3dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL3dv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribL3dv", 536, file, line );
-    gldlVertexAttribL3dv_impl( index, v );
+    int breakpoint = DebugTest( 536 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribL3dv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribL3dv_impl( index, v );
 }
 
 void gldlVertexAttribL4dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribL4dv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glVertexAttribL4dv", 538, file, line );
-    gldlVertexAttribL4dv_impl( index, v );
+    int breakpoint = DebugTest( 538 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribL4dv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribL4dv_impl( index, v );
 }
 
 void gldlVertexAttribLPointer ( GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glVertexAttribLPointer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glVertexAttribLPointer", 539, file, line );
-    gldlVertexAttribLPointer_impl( index, size, type, stride, pointer );
+    int breakpoint = DebugTest( 539 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glVertexAttribLPointer( index=%s, size=%s, type=%s, stride=%s, pointer=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlVertexAttribLPointer_impl( index, size, type, stride, pointer );
 }
 
 void gldlGetVertexAttribLdv ( GLuint index, GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetVertexAttribLdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetVertexAttribLdv", 229, file, line );
-    gldlGetVertexAttribLdv_impl( index, pname, params );
+    int breakpoint = DebugTest( 229 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetVertexAttribLdv( index=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetVertexAttribLdv_impl( index, pname, params );
 }
 
 void gldlViewportArrayv ( GLuint first, GLsizei count, const GLfloat *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glViewportArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glViewportArrayv", 556, file, line );
-    gldlViewportArrayv_impl( first, count, v );
+    int breakpoint = DebugTest( 556 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glViewportArrayv( first=%s, count=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlViewportArrayv_impl( first, count, v );
 }
 
 void gldlViewportIndexedf ( GLuint index, GLfloat x, GLfloat y, GLfloat w, GLfloat h, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glViewportIndexedf( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glViewportIndexedf", 557, file, line );
-    gldlViewportIndexedf_impl( index, x, y, w, h );
+    int breakpoint = DebugTest( 557 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glViewportIndexedf( index=%s, x=%s, y=%s, w=%s, h=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlViewportIndexedf_impl( index, x, y, w, h );
 }
 
 void gldlViewportIndexedfv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glViewportIndexedfv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glViewportIndexedfv", 558, file, line );
-    gldlViewportIndexedfv_impl( index, v );
+    int breakpoint = DebugTest( 558 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glViewportIndexedfv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlViewportIndexedfv_impl( index, v );
 }
 
 void gldlScissorArrayv ( GLuint first, GLsizei count, const GLint *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glScissorArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glScissorArrayv", 373, file, line );
-    gldlScissorArrayv_impl( first, count, v );
+    int breakpoint = DebugTest( 373 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glScissorArrayv( first=%s, count=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlScissorArrayv_impl( first, count, v );
 }
 
 void gldlScissorIndexed ( GLuint index, GLint left, GLint bottom, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glScissorIndexed( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glScissorIndexed", 374, file, line );
-    gldlScissorIndexed_impl( index, left, bottom, width, height );
+    int breakpoint = DebugTest( 374 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glScissorIndexed( index=%s, left=%s, bottom=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlScissorIndexed_impl( index, left, bottom, width, height );
 }
 
 void gldlScissorIndexedv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glScissorIndexedv( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glScissorIndexedv", 375, file, line );
-    gldlScissorIndexedv_impl( index, v );
+    int breakpoint = DebugTest( 375 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glScissorIndexedv( index=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlScissorIndexedv_impl( index, v );
 }
 
 void gldlDepthRangeArrayv ( GLuint first, GLsizei count, const GLclampd *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDepthRangeArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glDepthRangeArrayv", 93, file, line );
-    gldlDepthRangeArrayv_impl( first, count, v );
+    int breakpoint = DebugTest( 93 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDepthRangeArrayv( first=%s, count=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlDepthRangeArrayv_impl( first, count, v );
 }
 
 void gldlDepthRangeIndexed ( GLuint index, GLclampd n, GLclampd f, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDepthRangeIndexed( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glDepthRangeIndexed", 94, file, line );
-    gldlDepthRangeIndexed_impl( index, n, f );
+    int breakpoint = DebugTest( 94 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDepthRangeIndexed( index=%s, n=%s, f=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlDepthRangeIndexed_impl( index, n, f );
 }
 
 void gldlGetFloati_v ( GLenum target, GLuint index, GLfloat *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetFloati_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetFloati_v", 170, file, line );
-    gldlGetFloati_v_impl( target, index, data );
+    int breakpoint = DebugTest( 170 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetFloati_v( target=%s, index=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetFloati_v_impl( target, index, data );
 }
 
 void gldlGetDoublei_v ( GLenum target, GLuint index, GLdouble *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetDoublei_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetDoublei_v", 167, file, line );
-    gldlGetDoublei_v_impl( target, index, data );
+    int breakpoint = DebugTest( 167 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetDoublei_v( target=%s, index=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetDoublei_v_impl( target, index, data );
 }
 
 GLsync gldlCreateSyncFromCLeventARB ( struct _cl_context * context, struct _cl_event * event, GLbitfield flags, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glCreateSyncFromCLeventARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glCreateSyncFromCLeventARB", 72, file, line );
-    return gldlCreateSyncFromCLeventARB_impl( context, event, flags );
+    int breakpoint = DebugTest( 72 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glCreateSyncFromCLeventARB( context=%s, event=%s, flags=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	return gldlCreateSyncFromCLeventARB_impl( context, event, flags );
 }
 
 void gldlDebugMessageControlARB ( GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint *ids, GLboolean enabled, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDebugMessageControlARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glDebugMessageControlARB", 75, file, line );
-    gldlDebugMessageControlARB_impl( source, type, severity, count, ids, enabled );
+    int breakpoint = DebugTest( 75 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDebugMessageControlARB( source=%s, type=%s, severity=%s, count=%s, ids=%s, enabled=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlDebugMessageControlARB_impl( source, type, severity, count, ids, enabled );
 }
 
 void gldlDebugMessageInsertARB ( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *buf, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDebugMessageInsertARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glDebugMessageInsertARB", 76, file, line );
-    gldlDebugMessageInsertARB_impl( source, type, id, severity, length, buf );
+    int breakpoint = DebugTest( 76 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDebugMessageInsertARB( source=%s, type=%s, id=%s, severity=%s, length=%s, buf=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlDebugMessageInsertARB_impl( source, type, id, severity, length, buf );
 }
 
 void gldlDebugMessageCallbackARB ( GLDEBUGPROCARB callback, const GLvoid *userParam, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDebugMessageCallbackARB( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glDebugMessageCallbackARB", 74, file, line );
-    gldlDebugMessageCallbackARB_impl( callback, userParam );
+    int breakpoint = DebugTest( 74 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDebugMessageCallbackARB( callback=%s, userParam=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlDebugMessageCallbackARB_impl( callback, userParam );
 }
 
 GLuint gldlGetDebugMessageLogARB ( GLuint count, GLsizei bufsize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetDebugMessageLogARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
-    DebugTest( "glGetDebugMessageLogARB", 166, file, line );
-    return gldlGetDebugMessageLogARB_impl( count, bufsize, sources, types, ids, severities, lengths, messageLog );
+    int breakpoint = DebugTest( 166 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetDebugMessageLogARB( count=%s, bufsize=%s, sources=%s, types=%s, ids=%s, severities=%s, lengths=%s, messageLog=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, file, line );
+		DebugFunction();
+	}
+	return gldlGetDebugMessageLogARB_impl( count, bufsize, sources, types, ids, severities, lengths, messageLog );
 }
 
 GLenum gldlGetGraphicsResetStatusARB ( const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetGraphicsResetStatusARB();\n", file, line );
 
-    DebugTest( "glGetGraphicsResetStatusARB", 175, file, line );
-    return gldlGetGraphicsResetStatusARB_impl(  );
+    int breakpoint = DebugTest( 175 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetGraphicsResetStatusARB( ) at %s:%d\n", breakpoint, file, line );
+		DebugFunction();
+	}
+	return gldlGetGraphicsResetStatusARB_impl(  );
 }
 
 void gldlGetnMapdvARB ( GLenum target, GLenum query, GLsizei bufSize, GLdouble *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnMapdvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetnMapdvARB", 238, file, line );
-    gldlGetnMapdvARB_impl( target, query, bufSize, v );
+    int breakpoint = DebugTest( 238 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnMapdvARB( target=%s, query=%s, bufSize=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetnMapdvARB_impl( target, query, bufSize, v );
 }
 
 void gldlGetnMapfvARB ( GLenum target, GLenum query, GLsizei bufSize, GLfloat *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnMapfvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetnMapfvARB", 239, file, line );
-    gldlGetnMapfvARB_impl( target, query, bufSize, v );
+    int breakpoint = DebugTest( 239 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnMapfvARB( target=%s, query=%s, bufSize=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetnMapfvARB_impl( target, query, bufSize, v );
 }
 
 void gldlGetnMapivARB ( GLenum target, GLenum query, GLsizei bufSize, GLint *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnMapivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetnMapivARB", 240, file, line );
-    gldlGetnMapivARB_impl( target, query, bufSize, v );
+    int breakpoint = DebugTest( 240 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnMapivARB( target=%s, query=%s, bufSize=%s, v=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetnMapivARB_impl( target, query, bufSize, v );
 }
 
 void gldlGetnPixelMapfvARB ( GLenum map, GLsizei bufSize, GLfloat *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnPixelMapfvARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetnPixelMapfvARB", 242, file, line );
-    gldlGetnPixelMapfvARB_impl( map, bufSize, values );
+    int breakpoint = DebugTest( 242 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnPixelMapfvARB( map=%s, bufSize=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetnPixelMapfvARB_impl( map, bufSize, values );
 }
 
 void gldlGetnPixelMapuivARB ( GLenum map, GLsizei bufSize, GLuint *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnPixelMapuivARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetnPixelMapuivARB", 243, file, line );
-    gldlGetnPixelMapuivARB_impl( map, bufSize, values );
+    int breakpoint = DebugTest( 243 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnPixelMapuivARB( map=%s, bufSize=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetnPixelMapuivARB_impl( map, bufSize, values );
 }
 
 void gldlGetnPixelMapusvARB ( GLenum map, GLsizei bufSize, GLushort *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnPixelMapusvARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glGetnPixelMapusvARB", 244, file, line );
-    gldlGetnPixelMapusvARB_impl( map, bufSize, values );
+    int breakpoint = DebugTest( 244 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnPixelMapusvARB( map=%s, bufSize=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlGetnPixelMapusvARB_impl( map, bufSize, values );
 }
 
 void gldlGetnPolygonStippleARB ( GLsizei bufSize, GLubyte *pattern, const char *arg0, const char *arg1, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnPolygonStippleARB( %s, %s );\n", file, line, arg0,  arg1 );
 
-    DebugTest( "glGetnPolygonStippleARB", 245, file, line );
-    gldlGetnPolygonStippleARB_impl( bufSize, pattern );
+    int breakpoint = DebugTest( 245 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnPolygonStippleARB( bufSize=%s, pattern=%s ) at %s:%d\n", breakpoint, arg0, arg1, file, line );
+		DebugFunction();
+	}
+	gldlGetnPolygonStippleARB_impl( bufSize, pattern );
 }
 
 void gldlGetnColorTableARB ( GLenum target, GLenum format, GLenum type, GLsizei bufSize, GLvoid *table, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnColorTableARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetnColorTableARB", 234, file, line );
-    gldlGetnColorTableARB_impl( target, format, type, bufSize, table );
+    int breakpoint = DebugTest( 234 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnColorTableARB( target=%s, format=%s, type=%s, bufSize=%s, table=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetnColorTableARB_impl( target, format, type, bufSize, table );
 }
 
 void gldlGetnConvolutionFilterARB ( GLenum target, GLenum format, GLenum type, GLsizei bufSize, GLvoid *image, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnConvolutionFilterARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetnConvolutionFilterARB", 236, file, line );
-    gldlGetnConvolutionFilterARB_impl( target, format, type, bufSize, image );
+    int breakpoint = DebugTest( 236 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnConvolutionFilterARB( target=%s, format=%s, type=%s, bufSize=%s, image=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetnConvolutionFilterARB_impl( target, format, type, bufSize, image );
 }
 
 void gldlGetnSeparableFilterARB ( GLenum target, GLenum format, GLenum type, GLsizei rowBufSize, GLvoid *row, GLsizei columnBufSize, GLvoid *column, GLvoid *span, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnSeparableFilterARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
-    DebugTest( "glGetnSeparableFilterARB", 246, file, line );
-    gldlGetnSeparableFilterARB_impl( target, format, type, rowBufSize, row, columnBufSize, column, span );
+    int breakpoint = DebugTest( 246 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnSeparableFilterARB( target=%s, format=%s, type=%s, rowBufSize=%s, row=%s, columnBufSize=%s, column=%s, span=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, file, line );
+		DebugFunction();
+	}
+	gldlGetnSeparableFilterARB_impl( target, format, type, rowBufSize, row, columnBufSize, column, span );
 }
 
 void gldlGetnHistogramARB ( GLenum target, GLboolean reset, GLenum format, GLenum type, GLsizei bufSize, GLvoid *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnHistogramARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glGetnHistogramARB", 237, file, line );
-    gldlGetnHistogramARB_impl( target, reset, format, type, bufSize, values );
+    int breakpoint = DebugTest( 237 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnHistogramARB( target=%s, reset=%s, format=%s, type=%s, bufSize=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlGetnHistogramARB_impl( target, reset, format, type, bufSize, values );
 }
 
 void gldlGetnMinmaxARB ( GLenum target, GLboolean reset, GLenum format, GLenum type, GLsizei bufSize, GLvoid *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnMinmaxARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glGetnMinmaxARB", 241, file, line );
-    gldlGetnMinmaxARB_impl( target, reset, format, type, bufSize, values );
+    int breakpoint = DebugTest( 241 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnMinmaxARB( target=%s, reset=%s, format=%s, type=%s, bufSize=%s, values=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlGetnMinmaxARB_impl( target, reset, format, type, bufSize, values );
 }
 
 void gldlGetnTexImageARB ( GLenum target, GLint level, GLenum format, GLenum type, GLsizei bufSize, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnTexImageARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glGetnTexImageARB", 247, file, line );
-    gldlGetnTexImageARB_impl( target, level, format, type, bufSize, img );
+    int breakpoint = DebugTest( 247 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnTexImageARB( target=%s, level=%s, format=%s, type=%s, bufSize=%s, img=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlGetnTexImageARB_impl( target, level, format, type, bufSize, img );
 }
 
 void gldlReadnPixelsARB ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glReadnPixelsARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
-    DebugTest( "glReadnPixelsARB", 359, file, line );
-    gldlReadnPixelsARB_impl( x, y, width, height, format, type, bufSize, data );
+    int breakpoint = DebugTest( 359 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glReadnPixelsARB( x=%s, y=%s, width=%s, height=%s, format=%s, type=%s, bufSize=%s, data=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, file, line );
+		DebugFunction();
+	}
+	gldlReadnPixelsARB_impl( x, y, width, height, format, type, bufSize, data );
 }
 
 void gldlGetnCompressedTexImageARB ( GLenum target, GLint lod, GLsizei bufSize, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnCompressedTexImageARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetnCompressedTexImageARB", 235, file, line );
-    gldlGetnCompressedTexImageARB_impl( target, lod, bufSize, img );
+    int breakpoint = DebugTest( 235 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnCompressedTexImageARB( target=%s, lod=%s, bufSize=%s, img=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetnCompressedTexImageARB_impl( target, lod, bufSize, img );
 }
 
 void gldlGetnUniformfvARB ( GLuint program, GLint location, GLsizei bufSize, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnUniformfvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetnUniformfvARB", 249, file, line );
-    gldlGetnUniformfvARB_impl( program, location, bufSize, params );
+    int breakpoint = DebugTest( 249 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnUniformfvARB( program=%s, location=%s, bufSize=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetnUniformfvARB_impl( program, location, bufSize, params );
 }
 
 void gldlGetnUniformivARB ( GLuint program, GLint location, GLsizei bufSize, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnUniformivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetnUniformivARB", 250, file, line );
-    gldlGetnUniformivARB_impl( program, location, bufSize, params );
+    int breakpoint = DebugTest( 250 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnUniformivARB( program=%s, location=%s, bufSize=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetnUniformivARB_impl( program, location, bufSize, params );
 }
 
 void gldlGetnUniformuivARB ( GLuint program, GLint location, GLsizei bufSize, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnUniformuivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetnUniformuivARB", 251, file, line );
-    gldlGetnUniformuivARB_impl( program, location, bufSize, params );
+    int breakpoint = DebugTest( 251 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnUniformuivARB( program=%s, location=%s, bufSize=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetnUniformuivARB_impl( program, location, bufSize, params );
 }
 
 void gldlGetnUniformdvARB ( GLuint program, GLint location, GLsizei bufSize, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetnUniformdvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetnUniformdvARB", 248, file, line );
-    gldlGetnUniformdvARB_impl( program, location, bufSize, params );
+    int breakpoint = DebugTest( 248 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetnUniformdvARB( program=%s, location=%s, bufSize=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetnUniformdvARB_impl( program, location, bufSize, params );
 }
 
 void gldlDrawArraysInstancedBaseInstance ( GLenum mode, GLint first, GLsizei count, GLsizei primcount, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawArraysInstancedBaseInstance( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glDrawArraysInstancedBaseInstance", 103, file, line );
-    gldlDrawArraysInstancedBaseInstance_impl( mode, first, count, primcount, baseinstance );
+    int breakpoint = DebugTest( 103 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawArraysInstancedBaseInstance( mode=%s, first=%s, count=%s, primcount=%s, baseinstance=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlDrawArraysInstancedBaseInstance_impl( mode, first, count, primcount, baseinstance );
 }
 
 void gldlDrawElementsInstancedBaseInstance ( GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseInstance( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glDrawElementsInstancedBaseInstance", 110, file, line );
-    gldlDrawElementsInstancedBaseInstance_impl( mode, count, type, indices, primcount, baseinstance );
+    int breakpoint = DebugTest( 110 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawElementsInstancedBaseInstance( mode=%s, count=%s, type=%s, indices=%s, primcount=%s, baseinstance=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlDrawElementsInstancedBaseInstance_impl( mode, count, type, indices, primcount, baseinstance );
 }
 
 void gldlDrawElementsInstancedBaseVertexBaseInstance ( GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount, GLint basevertex, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseVertexBaseInstance( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glDrawElementsInstancedBaseVertexBaseInstance", 112, file, line );
-    gldlDrawElementsInstancedBaseVertexBaseInstance_impl( mode, count, type, indices, primcount, basevertex, baseinstance );
+    int breakpoint = DebugTest( 112 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawElementsInstancedBaseVertexBaseInstance( mode=%s, count=%s, type=%s, indices=%s, primcount=%s, basevertex=%s, baseinstance=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlDrawElementsInstancedBaseVertexBaseInstance_impl( mode, count, type, indices, primcount, basevertex, baseinstance );
 }
 
 void gldlDrawTransformFeedbackInstanced ( GLenum mode, GLuint id, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawTransformFeedbackInstanced( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
-    DebugTest( "glDrawTransformFeedbackInstanced", 116, file, line );
-    gldlDrawTransformFeedbackInstanced_impl( mode, id, primcount );
+    int breakpoint = DebugTest( 116 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawTransformFeedbackInstanced( mode=%s, id=%s, primcount=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, file, line );
+		DebugFunction();
+	}
+	gldlDrawTransformFeedbackInstanced_impl( mode, id, primcount );
 }
 
 void gldlDrawTransformFeedbackStreamInstanced ( GLenum mode, GLuint id, GLuint stream, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glDrawTransformFeedbackStreamInstanced( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glDrawTransformFeedbackStreamInstanced", 118, file, line );
-    gldlDrawTransformFeedbackStreamInstanced_impl( mode, id, stream, primcount );
+    int breakpoint = DebugTest( 118 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glDrawTransformFeedbackStreamInstanced( mode=%s, id=%s, stream=%s, primcount=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlDrawTransformFeedbackStreamInstanced_impl( mode, id, stream, primcount );
 }
 
 void gldlGetInternalformativ ( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetInternalformativ( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glGetInternalformativ", 180, file, line );
-    gldlGetInternalformativ_impl( target, internalformat, pname, bufSize, params );
+    int breakpoint = DebugTest( 180 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetInternalformativ( target=%s, internalformat=%s, pname=%s, bufSize=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlGetInternalformativ_impl( target, internalformat, pname, bufSize, params );
 }
 
 void gldlGetActiveAtomicCounterBufferiv ( GLuint program, GLuint bufferIndex, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glGetActiveAtomicCounterBufferiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glGetActiveAtomicCounterBufferiv", 147, file, line );
-    gldlGetActiveAtomicCounterBufferiv_impl( program, bufferIndex, pname, params );
+    int breakpoint = DebugTest( 147 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glGetActiveAtomicCounterBufferiv( program=%s, bufferIndex=%s, pname=%s, params=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlGetActiveAtomicCounterBufferiv_impl( program, bufferIndex, pname, params );
 }
 
 void gldlBindImageTexture ( GLuint unit, GLuint texture, GLint level, GLboolean layered, GLint layer, GLenum access, GLenum format, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glBindImageTexture( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glBindImageTexture", 14, file, line );
-    gldlBindImageTexture_impl( unit, texture, level, layered, layer, access, format );
+    int breakpoint = DebugTest( 14 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glBindImageTexture( unit=%s, texture=%s, level=%s, layered=%s, layer=%s, access=%s, format=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlBindImageTexture_impl( unit, texture, level, layered, layer, access, format );
 }
 
 void gldlMemoryBarrier ( GLbitfield barriers, const char *arg0, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glMemoryBarrier( %s );\n", file, line,  arg0 );
 
-    DebugTest( "glMemoryBarrier", 273, file, line );
-    gldlMemoryBarrier_impl( barriers );
+    int breakpoint = DebugTest( 273 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glMemoryBarrier( barriers=%s ) at %s:%d\n", breakpoint, arg0, file, line );
+		DebugFunction();
+	}
+	gldlMemoryBarrier_impl( barriers );
 }
 
 void gldlTexStorage1D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexStorage1D( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
-    DebugTest( "glTexStorage1D", 406, file, line );
-    gldlTexStorage1D_impl( target, levels, internalformat, width );
+    int breakpoint = DebugTest( 406 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexStorage1D( target=%s, levels=%s, internalformat=%s, width=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, file, line );
+		DebugFunction();
+	}
+	gldlTexStorage1D_impl( target, levels, internalformat, width );
 }
 
 void gldlTexStorage2D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexStorage2D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glTexStorage2D", 407, file, line );
-    gldlTexStorage2D_impl( target, levels, internalformat, width, height );
+    int breakpoint = DebugTest( 407 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexStorage2D( target=%s, levels=%s, internalformat=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlTexStorage2D_impl( target, levels, internalformat, width, height );
 }
 
 void gldlTexStorage3D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTexStorage3D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glTexStorage3D", 408, file, line );
-    gldlTexStorage3D_impl( target, levels, internalformat, width, height, depth );
+    int breakpoint = DebugTest( 408 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTexStorage3D( target=%s, levels=%s, internalformat=%s, width=%s, height=%s, depth=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlTexStorage3D_impl( target, levels, internalformat, width, height, depth );
 }
 
 void gldlTextureStorage1DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTextureStorage1DEXT( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
-    DebugTest( "glTextureStorage1DEXT", 412, file, line );
-    gldlTextureStorage1DEXT_impl( texture, target, levels, internalformat, width );
+    int breakpoint = DebugTest( 412 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTextureStorage1DEXT( texture=%s, target=%s, levels=%s, internalformat=%s, width=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, file, line );
+		DebugFunction();
+	}
+	gldlTextureStorage1DEXT_impl( texture, target, levels, internalformat, width );
 }
 
 void gldlTextureStorage2DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTextureStorage2DEXT( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
-    DebugTest( "glTextureStorage2DEXT", 413, file, line );
-    gldlTextureStorage2DEXT_impl( texture, target, levels, internalformat, width, height );
+    int breakpoint = DebugTest( 413 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTextureStorage2DEXT( texture=%s, target=%s, levels=%s, internalformat=%s, width=%s, height=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, file, line );
+		DebugFunction();
+	}
+	gldlTextureStorage2DEXT_impl( texture, target, levels, internalformat, width, height );
 }
 
 void gldlTextureStorage3DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
 	fprintf( trace, "call<%s,%d>: glTextureStorage3DEXT( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
-    DebugTest( "glTextureStorage3DEXT", 414, file, line );
-    gldlTextureStorage3DEXT_impl( texture, target, levels, internalformat, width, height, depth );
+    int breakpoint = DebugTest( 414 );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on glTextureStorage3DEXT( texture=%s, target=%s, levels=%s, internalformat=%s, width=%s, height=%s, depth=%s ) at %s:%d\n", breakpoint, arg0, arg1, arg2, arg3, arg4, arg5, arg6, file, line );
+		DebugFunction();
+	}
+	gldlTextureStorage3DEXT_impl( texture, target, levels, internalformat, width, height, depth );
 }
 

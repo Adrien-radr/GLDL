@@ -234,7 +234,7 @@ static struct {
 
 
 static int GetGLVersion();
-static void DebugTest( const char *func_name, int func_index, const char *file, int line );
+static int DebugTest( int func_index );
 static void DebugFunction();
 static void LoadProcs();
 
@@ -282,14 +282,14 @@ static int GetGLVersion() {
 }
 
 // Check if a breakpoint is set on the given function
-static void DebugTest( const char *func_name, int func_index, const char *file, int line ) {
+static int DebugTest( int func_index ) {
     for( int i = 0; i < 512; ++i ) {
-        if( -1 == break_functions[i] ) break;
-        if( func_index == break_functions[i] ) {
-            printf( "Breakpoint %d on %s() at %s:%d\n", i, func_name, file, line );
-            DebugFunction();
-        }
+        if( -1 == break_functions[i] ) 
+            break;
+        if( func_index == break_functions[i] ) 
+            return i;
     }
+    return -1;
 }
 
 // Interactive Debug session when a breakpoint arose or during initialization
@@ -306,62 +306,89 @@ static void DebugFunction() {
         gets( line );
         pline = strchr( line, ' ' );
 
-        // if parameters, get them in param
+        // parameter(s) found
         if( pline ) {
             pline[0] = 0;
             param = pline + 1;
-//            printf( "cmd = %s, param = %s\n", cmd, param );
-        }
 
-        if( !strcmp( cmd, "c" ) || !strcmp( cmd, "continue" ) )
-            break;
+            // check for break demand on GL function
+            if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
+                // retrieve function name index
+                int index = -1;
+                for( int i = 0; i < ''' + str(len(names)) + '''; ++i ) {
+                    int cmp = strcmp( param, gl_functions[i] );
 
-        // check for break demand on GL function
-        if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
-            // retrieve function name index
-            int index = -1;
-            for( int i = 0; i < ''' + str(len(names)) + '''; ++i ) {
-                int cmp = strcmp( param, gl_functions[i] );
-
-                if( !cmp ) {
-                    index = i;
-                    break;
-                }
-                else if( cmp < 0 ) {
-                    printf( "%s is not a valid GL function!\\n", param );
-                    break;
-                }
-            }
-
-            if( index >= 0 )
-                // insert function name index in next free spot
-                for( int i = 0; i < 512; ++i )
-                    if( -1 == break_functions[i] || -2 == break_functions[i] ) {
-                        break_functions[i] = index;
-                        printf( "Breakpoint %d, %s()\\n", i, param );
+                    if( !cmp ) {
+                        index = i;
                         break;
                     }
-        }
+                    else if( cmp < 0 ) {
+                        printf( "%s is not a valid GL function!\\n", param );
+                        break;
+                    }
+                }
 
-        // check for breakpoint deletion demand
-        else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
-            int index = atoi( param );
-            if( index >= 512  || ( !index && strcmp( param, "0" ) ) || -1 == break_functions[index] ) {
-                printf( "Breakpoint %s does not exist\\n", param );
-            } else {
-                break_functions[index] = -2;
-                printf( "Breakpoint %d deleted\\n", index );
+                if( index >= 0 )
+                    // insert function name index in next free spot
+                    for( int i = 0; i < 512; ++i )
+                        if( -1 == break_functions[i] || -2 == break_functions[i] ) {
+                            break_functions[i] = index;
+                            printf( "Breakpoint %d, %s()\\n", i, param );
+                            break;
+                        }
+            }
+
+            // check for breakpoint deletion demand
+            else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
+                int index = atoi( param );
+                if( index >= 512  || ( !index && strcmp( param, "0" ) ) || -1 == break_functions[index] ) {
+                    printf( "Breakpoint %s does not exist\\n", param );
+                } else {
+                    break_functions[index] = -2;
+                    printf( "Breakpoint %d deleted\\n", index );
+                }
+            }
+        
+        // no parameters, simple commands
+        } else {
+            // continue program execution
+            if( !strcmp( cmd, "c" ) || !strcmp( cmd, "continue" ) )
+                break;
+
+            // check for breakpoints listing
+            else if( !strcmp( cmd, "l" ) || !strcmp( cmd, "list" ) ) {
+                for( int i = 0; i < 512; ++i ) {
+                    if( -1 == break_functions[i] ) break;
+                    if( -2 == break_functions[i] ) continue;
+                    printf( "Breakpoint %d on function %s()\\n", i, gl_functions[break_functions[i]] );
+                }
+            }
+
+            // check for ALL breakpoints deletion
+            else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
+                // get confirmation
+                char str[4];
+                char c;
+
+                while( 1 ) {
+                    printf( "Delete all breakpoints? (y or n) " );
+                    gets( str );
+                    sscanf( str, "%c", &c );
+
+                    if( 'n' == c )
+                        break;
+                    if( 'y' == c ) {
+                        for( int i = 0; i < 512; ++i ) {
+                            if( -1 == break_functions[i] ) break;
+                            break_functions[i] = -1;
+                        }
+                        break;
+                    }
+                }
             }
         }
 
-        // check for breakpoints listing
-        else if( !strcmp( cmd, "l" ) || !strcmp( cmd, "list" ) ) {
-            for( int i = 0; i < 512; ++i ) {
-                if( -1 == break_functions[i] ) break;
-                if( -2 == break_functions[i] ) continue;
-                printf( "Breakpoint %d on function %s()\\n", i, gl_functions[break_functions[i]] );
-            }
-        }
+
 
         param = pline = NULL; 
     }
@@ -423,8 +450,23 @@ for i in range( len(names) ) :
 
     # Write interactive debug
     gldl_c.write( r'''
-    DebugTest( "''' + names[i] + '''", ''' + str(sorted_names.index( names[i] )) + ''', file, line );
-    ''')
+    int breakpoint = DebugTest( ''' + str(sorted_names.index( names[i] )) + ''' );
+    if( breakpoint >= 0 ) {
+        printf( "Breakpoint %d on ''' + names[i] + '''( ''')
+        
+    # print all args and their values
+    if parameters_n[i] == 0 :
+        gldl_c.write( ") at %s:%d\\n\", breakpoint, file, line );\n" )
+    else :
+        for j in range( parameters_n[i] - 1 ) :
+            gldl_c.write( param_names[j] + "=%s, " )
+        gldl_c.write( param_names[-1] + "=%s ) at %s:%d\\n\", breakpoint, " )
+
+        for j in range( parameters_n[i] - 1 ) :
+            gldl_c.write( "arg" + str(j) + ", " )
+        gldl_c.write( "arg" + str( parameters_n[i]-1 ) + ", file, line );\n" )
+
+    gldl_c.write( "\t\tDebugFunction();\n\t}\n\t" )
 
    
     # Return the value of GL impl if needed
