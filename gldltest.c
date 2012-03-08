@@ -63,6 +63,7 @@ int main() {
 
     }
 
+    gldlTerminate();
     glfwTerminate();
 
 	return 0;
