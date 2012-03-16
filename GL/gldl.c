@@ -1272,35 +1272,62 @@ static int DebugTest( int func_index ) {
 // Interactive Debug session when a breakpoint arose or during initialization
 static void DebugFunction() {
     char line[128];
-    line[0] = 0;
-    char *cmd = line;
-    char *pline, *param;
+    char cmd_buf[32], param_buf[64];
+    int scan_ret;
+    int nomatch = 0;
 
     while( 1 ) {
         printf( "> " );
     
         // get line from user and split it in 'cmd params'
         gets( line );
-        pline = strchr( line, ' ' );
+        scan_ret = sscanf( line, "%s %s", cmd_buf, param_buf );
 
-        // parameter(s) found
-        if( pline ) {
-            pline[0] = 0;
-            param = pline + 1;
+
+        // nothing on line
+        if( -1 == scan_ret ) 
+            continue;
+
+        // command found (and maybe param)
+        else {
+            // continue program execution
+            if( !strcmp( cmd_buf, "c" ) || !strcmp( cmd_buf, "continue" ) )
+                break;
+
+            // check for breakpoints listing
+            else if( !strcmp( cmd_buf, "l" ) || !strcmp( cmd_buf, "list" ) ) {
+                int found_one = 0;
+                for( int i = 0; i < 512; ++i ) {
+                    if( -1 == break_functions[i] ) break;
+                    if( -2 == break_functions[i] ) continue;
+                    printf( "Breakpoint %d on function %s()\n", i, gl_functions[break_functions[i]] );
+                    found_one = 1;
+                }
+
+                if( !found_one )
+                    printf( "No breakpoints set.\n" );
+            }
 
             // check for break demand on GL function
-            if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
+            else if( !strcmp( cmd_buf, "b" ) || !strcmp( cmd_buf, "break" ) ) {
                 // retrieve function name index
                 int index = -1;
+
+                // check for parameter
+                if( scan_ret == 1 ) {
+                    printf( "Break needs one parameter.\n" );
+                    continue;
+                }
+
                 for( int i = 0; i < 560; ++i ) {
-                    int cmp = strcmp( param, gl_functions[i] );
+                    int cmp = strcmp( param_buf, gl_functions[i] );
 
                     if( !cmp ) {
                         index = i;
                         break;
                     }
                     else if( cmp < 0 ) {
-                        printf( "%s is not a valid GL function!\n", param );
+                        printf( "%s is not a valid GL function!\n", param_buf );
                         break;
                     }
                 }
@@ -1308,45 +1335,32 @@ static void DebugFunction() {
                 if( index >= 0 )
                     // insert function name index in next free spot
                     for( int i = 0; i < 512; ++i )
-                        if( -1 == break_functions[i] || -2 == break_functions[i] ) {
+                        if( 0 > break_functions[i] ) {
                             break_functions[i] = index;
-                            printf( "Breakpoint %d, %s()\n", i, param );
+                            printf( "Breakpoint %d, %s()\n", i, param_buf );
                             break;
                         }
             }
 
-            // check for breakpoint deletion demand
-            else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
-                int index = atoi( param );
-                if( index >= 512  || ( !index && strcmp( param, "0" ) ) || -1 == break_functions[index] ) {
-                    printf( "Breakpoint %s does not exist\n", param );
-                } else {
-                    break_functions[index] = -2;
-                    printf( "Breakpoint %d deleted\n", index );
-                }
-            }
-        
-        // no parameters, simple commands
-        } else {
-            // continue program execution
-            if( !strcmp( cmd, "c" ) || !strcmp( cmd, "continue" ) )
-                break;
-
-            // check for breakpoints listing
-            else if( !strcmp( cmd, "l" ) || !strcmp( cmd, "list" ) ) {
-                for( int i = 0; i < 512; ++i ) {
-                    if( -1 == break_functions[i] ) break;
-                    if( -2 == break_functions[i] ) continue;
-                    printf( "Breakpoint %d on function %s()\n", i, gl_functions[break_functions[i]] );
-                }
-            }
-
-            // check for ALL breakpoints deletion
-            else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
+            // check for breakpoints deletion
+            else if( !strcmp( cmd_buf, "d" ) || !strcmp( cmd_buf, "delete" ) ) {
                 // get confirmation
                 char str[4];
                 char c;
 
+                // if param, delete wanted breakpoint
+                if( 2 == scan_ret ) {
+                    int index = atoi( param_buf );
+                    if( index < 0 || index >= 512  || ( !index && strcmp( param_buf, "0" ) ) || -1 == break_functions[index] ) {
+                        printf( "Breakpoint %s does not exist\n", param_buf );
+                    } else {
+                        break_functions[index] = -2;
+                        printf( "Breakpoint %d deleted\n", index );
+                    }
+                    continue;
+                }
+
+                // no param, ask for global deletion
                 while( 1 ) {
                     printf( "Delete all breakpoints? (y or n) " );
                     gets( str );
@@ -1365,14 +1379,23 @@ static void DebugFunction() {
             }
 
             // open glfw
-            else if( !strcmp( cmd, "glfw" ) ) {
+            else if( !strcmp( cmd_buf, "glfw" ) ) {
                 ShowTexture();
             }
+
+            // no match, show help
+            else 
+                nomatch = 1;
+
         }
 
+        
+        // show error if invalid command
+        if( nomatch ) {
+            printf( "Invalid command \"%s\". Try \"help\"\n", cmd_buf );
+            nomatch = 0;
+        }
 
-
-        param = pline = NULL; 
     }
 }
 
