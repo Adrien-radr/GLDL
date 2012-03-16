@@ -2,6 +2,7 @@
 
 #include "GL/gldl.h"
 #include "GL/glfw.h"
+#include <GL/glx.h>
 
 int main() {
 	int noerr = glfwInit();
@@ -63,7 +64,7 @@ int main() {
 
     }
 
-    gldlTerminate();
+    //gldlTerminate();
     glfwTerminate();
 
 	return 0;

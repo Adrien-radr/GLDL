@@ -9,6 +9,7 @@ return_types = []
 names = []
 parameters = []
 parameters_n = []
+max_name_len = 0
 
 procs_re = re.compile( r"^GLAPI.+APIENTRY gl.+(.*);$" )
 
@@ -24,6 +25,9 @@ for line in gl3_src :
         name, sig = line[name_pos:].split( None, 1 )
         names.append( name );
 
+        if( len(name) > max_name_len ) :
+            max_name_len = len(name)
+
         # Check if void parameter
         if( sig[1:-2] == "void" ) :
             parameters.append( "" )
@@ -31,6 +35,13 @@ for line in gl3_src :
         else :
             parameters.append( sig[1:-2] )
             parameters_n.append( len(sig[1:-2].split( "," ) ) )
+
+
+# Get alphabetically sorted name array (for faster search in C program)
+sorted_names = sorted( names )
+
+
+
 
 
 # Write GLDL header
@@ -55,7 +66,7 @@ extern "C" {
 
 // GLDL API functions
 int gldlInit();
-void gldlTerminate();
+//void gldlTerminate();
 int gldlIsSupported( unsigned int major, unsigned int minor );
 
 
@@ -105,65 +116,24 @@ gldl_h.write( r'''
 ''')
 
 
-# Write GLDL function array header
-gldl_fh = open( "gldl_funcarray.h", "w" )
-
-gldl_fh.write( r'''
-#ifndef __GLDL_FUNCARRAY_H
-#define __GLDL_FUNCARRAY_H
-
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-
-// Sorted array of all GL functions
-char* gl_functions[''' + str(len(names)) + '''];
-
-void InitFunctionArray();
-void DestroyFunctionArray();
-
-#endif //__GLDL_FUNCARRAY_H
-''')
 
 
-# Write GLDL function array src
-gldl_fc = open( "gldl_funcarray.c", "w" )
 
-# Get alphabetically sorted name array (for faster search in C program
-sorted_names = sorted( names )
 
-gldl_fc.write( r'''
-// This contains the functions needed to fill and destroy the gl_functions array
-// defined in gldl_funcarray.h. The indices in the array are used in gldl.c for debug
-
-#include "gldl_funcarray.h"
-
-void DestroyFunctionArray() {
-    for( int i = 0; i < ''' + str(len(names)) + '''; ++i )
-        free( gl_functions[i] );
-}
-
-void InitFunctionArray() {
-''')
-
-cpt = 0
-for name in sorted_names :
-    gldl_fc.write( "\tgl_functions[" + str(cpt) + "] = calloc( 1, " + str(len(name)+1) + " );\n\tstrcpy( gl_functions[" + str(cpt) + "], \"" + name + "\" );\n" )
-    cpt = cpt + 1
-
-gldl_fc.write('''}
-
-''')
 
 # Write GLDL src
 gldl_c = open( "gldl.c", "w" )
 
 gldl_c.write( r'''
 #include "gldl.h"
-#include "gldl_funcarray.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 
 //////////////////////////////////////////
-// Jump to line 575 for GLDL API functions
+// Jump to line 1138 for GLDL API functions
 //////////////////////////////////////////
 
 
@@ -176,6 +146,15 @@ for i in range( len(names) ) :
     gldl_c.write( "PFN" + names[i].upper() + "PROC gldl" + names[i][2:] + "_impl;\n" )
 
 gldl_c.write( r'''
+char *gl_functions[''' + str(len(names)) + '''] = { 
+''')
+
+for name in sorted_names :
+    gldl_c.write( "\t\"" + name + "\",\n" ) 
+
+gldl_c.write( r'''};
+
+
 
 // WINDOWS
 #if defined(_WIN32) || defined(WIN32)
@@ -216,6 +195,21 @@ gldl_c.write( r'''
 
         return proc;
     }
+
+void ShowTexture() {
+    Display *dsp = glXGetCurrentDisplay();
+    GLXContext ctx = glXGetCurrentContext();
+    GLXDrawable drawable = glXGetCurrentDrawable();
+
+    int success = glXMakeCurrent( dsp, None, NULL );
+    printf( "No context = %s\n", success > 0 ? "success" : "failure" );
+
+
+    // CREATE NEW DRAWABLE TO SHOW TEXTURE
+
+    success = glXMakeCurrent( dsp, drawable, ctx );
+    printf( "GLFW context = %s\n", success > 0 ? "success" : "failure" );
+}
 #endif
 
 
@@ -238,7 +232,6 @@ static int DebugTest( int func_index );
 static void DebugFunction();
 static void LoadProcs();
 
-
 // Public functions
 
 int gldlInit() {
@@ -246,21 +239,22 @@ int gldlInit() {
     LoadProcs();
     CloseLib();
 
+
     trace = fopen( "trace.log", "w" );
 
-    InitFunctionArray();
+    //InitFunctionArray();
 
     memset( break_functions, -1, 512 * sizeof(int) );
     DebugFunction();
 
     return GetGLVersion();
 }
-
+/*
 void gldlTerminate() {
     fclose( trace );
     DestroyFunctionArray();
 }
-
+*/
 int gldlIsSupported( unsigned int major, unsigned int minor ) {
     if( major < 3 ) return 0;
     if( major > gl_version.major ) return 1;
@@ -291,6 +285,7 @@ static int DebugTest( int func_index ) {
     }
     return -1;
 }
+
 
 // Interactive Debug session when a breakpoint arose or during initialization
 static void DebugFunction() {
@@ -385,6 +380,11 @@ static void DebugFunction() {
                         break;
                     }
                 }
+            }
+
+            // open glfw
+            else if( !strcmp( cmd, "glfw" ) ) {
+                ShowTexture();
             }
         }
 

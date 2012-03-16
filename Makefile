@@ -1,5 +1,5 @@
 CC = gcc
-LFLAGS = -Wall -std=c99 -g
+LFLAGS = -Wall -std=c99 -lglfw -g
 CFLAGS = -Wall -std=c99 -lglfw -lGL -lX11 -lXrandr -lpthread -ldl -g
 
 .PHONY: gldl,all,exec,clean
@@ -11,14 +11,12 @@ all:
 gldl: 
 	@gcc GL/gldl.c -c -o GL/gldl.o $(LFLAGS)
 	@echo "CC	gldl.c"
-	@gcc GL/gldl_funcarray.c -c -o GL/gldl_funcarray.o $(LFLAGS)
-	@echo "CC	gldl_funcarray.c"
-	@ar r gldl.a GL/gldl.o GL/gldl_funcarray.o
-	@ranlib gldl.a
-	@echo "AR	gldl.a"
+	#@ar r libgldl.a GL/gldl.o GL/gldl_funcarray.o
+	#@ranlib libgldl.a
+	#@echo "AR	libgldl.a"
 
 exec:
-	@gcc gldltest.c gldl.a -o bin/gldltest $(CFLAGS)
+	@gcc gldltest.c GL/gldl.o -o bin/gldltest $(CFLAGS)
 	@echo "CC	gldltest.c"
 
 clean:
