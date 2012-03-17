@@ -7,7 +7,7 @@
 
 
 //////////////////////////////////////////
-// Jump to line 1138 for GLDL API functions
+// Jump to line 1145 for GLDL API functions
 //////////////////////////////////////////
 
 
@@ -573,7 +573,11 @@ PFNGLTEXTURESTORAGE1DEXTPROC gldlTextureStorage1DEXT_impl;
 PFNGLTEXTURESTORAGE2DEXTPROC gldlTextureStorage2DEXT_impl;
 PFNGLTEXTURESTORAGE3DEXTPROC gldlTextureStorage3DEXT_impl;
 
-char *gl_functions[560] = { 
+// GL function number
+#define GLDL_FUNC_N 560
+
+// String array of all GL function names
+char *gl_functions[GLDL_FUNC_N] = { 
 	"glActiveShaderProgram",
 	"glActiveTexture",
 	"glAttachShader",
@@ -1144,9 +1148,6 @@ char *gl_functions[560] = {
 #   include <windows.h>
 
 #warning GLDL_WIN32
-// MAC
-#elif defined(__APPLE__) || defined(__APPLE_CC__)
-
 // UNIX
 #else
 #include <dlfcn.h>
@@ -1199,12 +1200,22 @@ void ShowTexture() {
 // ###################################################################
 // API FUNCTIONS
 
-FILE *trace = NULL;         // Trace log file
-int break_functions[512];   // Breakpoints storing array
+static int gldl_init = 0;                   // Assure that gldl has been init
+static int break_functions[GLDL_FUNC_N];    // Breakpoints storing array
+
+// GL function call traces
+// First trace is the init trace (trace until first glClear())
+// Five traces after that are custom traces (activated by gldlBeginTrace(n))
+#define TRACE_N 6
+static struct s_ct {
+    FILE        *f;
+    int         started;
+} traces[TRACE_N];
+
 
 static struct {
-    GLint major,
-          minor;
+    GLint       major,
+                minor;
 } gl_version;
 
 
@@ -1214,6 +1225,7 @@ static int DebugTest( int func_index );
 static void DebugFunction();
 static void LoadProcs();
 
+
 // Public functions
 
 int gldlInit() {
@@ -1221,22 +1233,21 @@ int gldlInit() {
     LoadProcs();
     CloseLib();
 
+    gldl_init = GetGLVersion();
 
-    trace = fopen( "trace.log", "w" );
+    if( gldl_init ) {
+        memset( traces, 0, TRACE_N * sizeof(struct s_ct) );
+        traces[0].f = fopen( "trace_init.log", "w" );
+        traces[0].started = 1;
 
-    //InitFunctionArray();
+        memset( break_functions, -1, GLDL_FUNC_N * sizeof(int) );
+        DebugFunction();
+    }
+    
 
-    memset( break_functions, -1, 512 * sizeof(int) );
-    DebugFunction();
-
-    return GetGLVersion();
+    return gldl_init;
 }
-/*
-void gldlTerminate() {
-    fclose( trace );
-    DestroyFunctionArray();
-}
-*/
+
 int gldlIsSupported( unsigned int major, unsigned int minor ) {
     if( major < 3 ) return 0;
     if( major > gl_version.major ) return 1;
@@ -1244,22 +1255,41 @@ int gldlIsSupported( unsigned int major, unsigned int minor ) {
     return ( major == gl_version.major && minor >= gl_version.minor );
 }
 
+void gldlBeginTrace( unsigned int trace_n ) {
+    if( !trace_n || trace_n >= TRACE_N ) return;
+
+    if( !traces[trace_n].f ) {
+        char filename[16];
+        sprintf( filename, "trace%d.log", trace_n );
+
+        traces[trace_n].f = fopen( filename, "w" );
+    }
+
+    traces[trace_n].started = 1;
+}
+
+void gldlEndTrace( unsigned int trace_n ) {
+    if( !trace_n || trace_n >= TRACE_N ) return;
+
+    traces[trace_n].started = 0;
+}
 
 // Private functions
 
 // Store the used GL version in the gl_version struct
+// Returns 1 if Core Profile loaded correctly
 static int GetGLVersion() {
     gldlGetIntegerv_impl( GL_MAJOR_VERSION, &gl_version.major );
     gldlGetIntegerv_impl( GL_MINOR_VERSION, &gl_version.minor );
 
-    if( gl_version.major < 3 ) return -1;
+    if( gl_version.major < 3 ) return 0;
 
-    return 0;
+    return 1;
 }
 
 // Check if a breakpoint is set on the given function
 static int DebugTest( int func_index ) {
-    for( int i = 0; i < 512; ++i ) {
+    for( int i = 0; i < GLDL_FUNC_N; ++i ) {
         if( -1 == break_functions[i] ) 
             break;
         if( func_index == break_functions[i] ) 
@@ -1297,7 +1327,7 @@ static void DebugFunction() {
             // check for breakpoints listing
             else if( !strcmp( cmd_buf, "l" ) || !strcmp( cmd_buf, "list" ) ) {
                 int found_one = 0;
-                for( int i = 0; i < 512; ++i ) {
+                for( int i = 0; i < GLDL_FUNC_N; ++i ) {
                     if( -1 == break_functions[i] ) break;
                     if( -2 == break_functions[i] ) continue;
                     printf( "Breakpoint %d on function %s()\n", i, gl_functions[break_functions[i]] );
@@ -1334,7 +1364,7 @@ static void DebugFunction() {
 
                 if( index >= 0 )
                     // insert function name index in next free spot
-                    for( int i = 0; i < 512; ++i )
+                    for( int i = 0; i < GLDL_FUNC_N; ++i )
                         if( 0 > break_functions[i] ) {
                             break_functions[i] = index;
                             printf( "Breakpoint %d, %s()\n", i, param_buf );
@@ -1351,7 +1381,7 @@ static void DebugFunction() {
                 // if param, delete wanted breakpoint
                 if( 2 == scan_ret ) {
                     int index = atoi( param_buf );
-                    if( index < 0 || index >= 512  || ( !index && strcmp( param_buf, "0" ) ) || -1 == break_functions[index] ) {
+                    if( index < 0 || index >= GLDL_FUNC_N  || ( !index && strcmp( param_buf, "0" ) ) || -1 == break_functions[index] ) {
                         printf( "Breakpoint %s does not exist\n", param_buf );
                     } else {
                         break_functions[index] = -2;
@@ -1369,7 +1399,7 @@ static void DebugFunction() {
                     if( 'n' == c )
                         break;
                     if( 'y' == c ) {
-                        for( int i = 0; i < 512; ++i ) {
+                        for( int i = 0; i < GLDL_FUNC_N; ++i ) {
                             if( -1 == break_functions[i] ) break;
                             break_functions[i] = -1;
                         }
@@ -1971,7 +2001,9 @@ static void LoadProcs() {
 // ###################################################################
 // GLDL Debug Functions
 void gldlCullFace ( GLenum mode, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCullFace( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCullFace( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 73 );
     if( breakpoint >= 0 ) {
@@ -1982,7 +2014,9 @@ void gldlCullFace ( GLenum mode, const char *arg0, const char *file, int line ) 
 }
 
 void gldlFrontFace ( GLenum mode, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFrontFace( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFrontFace( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 136 );
     if( breakpoint >= 0 ) {
@@ -1993,7 +2027,9 @@ void gldlFrontFace ( GLenum mode, const char *arg0, const char *file, int line )
 }
 
 void gldlHint ( GLenum target, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glHint( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glHint( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 252 );
     if( breakpoint >= 0 ) {
@@ -2004,7 +2040,9 @@ void gldlHint ( GLenum target, GLenum mode, const char *arg0, const char *arg1, 
 }
 
 void gldlLineWidth ( GLfloat width, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glLineWidth( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glLineWidth( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 268 );
     if( breakpoint >= 0 ) {
@@ -2015,7 +2053,9 @@ void gldlLineWidth ( GLfloat width, const char *arg0, const char *file, int line
 }
 
 void gldlPointSize ( GLfloat size, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPointSize( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPointSize( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 299 );
     if( breakpoint >= 0 ) {
@@ -2026,7 +2066,9 @@ void gldlPointSize ( GLfloat size, const char *arg0, const char *file, int line 
 }
 
 void gldlPolygonMode ( GLenum face, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPolygonMode( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPolygonMode( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 300 );
     if( breakpoint >= 0 ) {
@@ -2037,7 +2079,9 @@ void gldlPolygonMode ( GLenum face, GLenum mode, const char *arg0, const char *a
 }
 
 void gldlScissor ( GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glScissor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glScissor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 372 );
     if( breakpoint >= 0 ) {
@@ -2048,7 +2092,9 @@ void gldlScissor ( GLint x, GLint y, GLsizei width, GLsizei height, const char *
 }
 
 void gldlTexParameterf ( GLenum target, GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexParameterf( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexParameterf( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 402 );
     if( breakpoint >= 0 ) {
@@ -2059,7 +2105,9 @@ void gldlTexParameterf ( GLenum target, GLenum pname, GLfloat param, const char 
 }
 
 void gldlTexParameterfv ( GLenum target, GLenum pname, const GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 403 );
     if( breakpoint >= 0 ) {
@@ -2070,7 +2118,9 @@ void gldlTexParameterfv ( GLenum target, GLenum pname, const GLfloat *params, co
 }
 
 void gldlTexParameteri ( GLenum target, GLenum pname, GLint param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 404 );
     if( breakpoint >= 0 ) {
@@ -2081,7 +2131,9 @@ void gldlTexParameteri ( GLenum target, GLenum pname, GLint param, const char *a
 }
 
 void gldlTexParameteriv ( GLenum target, GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 405 );
     if( breakpoint >= 0 ) {
@@ -2092,7 +2144,9 @@ void gldlTexParameteriv ( GLenum target, GLenum pname, const GLint *params, cons
 }
 
 void gldlTexImage1D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexImage1D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexImage1D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
     int breakpoint = DebugTest( 395 );
     if( breakpoint >= 0 ) {
@@ -2103,7 +2157,9 @@ void gldlTexImage1D ( GLenum target, GLint level, GLint internalformat, GLsizei 
 }
 
 void gldlTexImage2D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
     int breakpoint = DebugTest( 396 );
     if( breakpoint >= 0 ) {
@@ -2114,7 +2170,9 @@ void gldlTexImage2D ( GLenum target, GLint level, GLint internalformat, GLsizei 
 }
 
 void gldlDrawBuffer ( GLenum mode, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawBuffer( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawBuffer( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 104 );
     if( breakpoint >= 0 ) {
@@ -2125,7 +2183,14 @@ void gldlDrawBuffer ( GLenum mode, const char *arg0, const char *file, int line 
 }
 
 void gldlClear ( GLbitfield mask, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClear( %s );\n", file, line,  arg0 );
+    if( traces[0].started ) {
+        traces[0].started = 0;
+        fclose( traces[0].f );
+    }
+
+        for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClear( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 39 );
     if( breakpoint >= 0 ) {
@@ -2136,7 +2201,9 @@ void gldlClear ( GLbitfield mask, const char *arg0, const char *file, int line )
 }
 
 void gldlClearColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClearColor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClearColor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 44 );
     if( breakpoint >= 0 ) {
@@ -2147,7 +2214,9 @@ void gldlClearColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alph
 }
 
 void gldlClearStencil ( GLint s, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClearStencil( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClearStencil( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 47 );
     if( breakpoint >= 0 ) {
@@ -2158,7 +2227,9 @@ void gldlClearStencil ( GLint s, const char *arg0, const char *file, int line ) 
 }
 
 void gldlClearDepth ( GLclampd depth, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClearDepth( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClearDepth( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 45 );
     if( breakpoint >= 0 ) {
@@ -2169,7 +2240,9 @@ void gldlClearDepth ( GLclampd depth, const char *arg0, const char *file, int li
 }
 
 void gldlStencilMask ( GLuint mask, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glStencilMask( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glStencilMask( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 382 );
     if( breakpoint >= 0 ) {
@@ -2180,7 +2253,9 @@ void gldlStencilMask ( GLuint mask, const char *arg0, const char *file, int line
 }
 
 void gldlColorMask ( GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glColorMask( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glColorMask( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 49 );
     if( breakpoint >= 0 ) {
@@ -2191,7 +2266,9 @@ void gldlColorMask ( GLboolean red, GLboolean green, GLboolean blue, GLboolean a
 }
 
 void gldlDepthMask ( GLboolean flag, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDepthMask( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDepthMask( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 91 );
     if( breakpoint >= 0 ) {
@@ -2202,7 +2279,9 @@ void gldlDepthMask ( GLboolean flag, const char *arg0, const char *file, int lin
 }
 
 void gldlDisable ( GLenum cap, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDisable( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDisable( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 97 );
     if( breakpoint >= 0 ) {
@@ -2213,7 +2292,9 @@ void gldlDisable ( GLenum cap, const char *arg0, const char *file, int line ) {
 }
 
 void gldlEnable ( GLenum cap, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glEnable( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glEnable( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 119 );
     if( breakpoint >= 0 ) {
@@ -2224,7 +2305,9 @@ void gldlEnable ( GLenum cap, const char *arg0, const char *file, int line ) {
 }
 
 void gldlFinish ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFinish();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFinish();\n", file, line );
 
     int breakpoint = DebugTest( 127 );
     if( breakpoint >= 0 ) {
@@ -2235,7 +2318,9 @@ void gldlFinish ( const char *file, int line ) {
 }
 
 void gldlFlush ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFlush();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFlush();\n", file, line );
 
     int breakpoint = DebugTest( 128 );
     if( breakpoint >= 0 ) {
@@ -2246,7 +2331,9 @@ void gldlFlush ( const char *file, int line ) {
 }
 
 void gldlBlendFunc ( GLenum sfactor, GLenum dfactor, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendFunc( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendFunc( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 28 );
     if( breakpoint >= 0 ) {
@@ -2257,7 +2344,9 @@ void gldlBlendFunc ( GLenum sfactor, GLenum dfactor, const char *arg0, const cha
 }
 
 void gldlLogicOp ( GLenum opcode, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glLogicOp( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glLogicOp( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 270 );
     if( breakpoint >= 0 ) {
@@ -2268,7 +2357,9 @@ void gldlLogicOp ( GLenum opcode, const char *arg0, const char *file, int line )
 }
 
 void gldlStencilFunc ( GLenum func, GLint ref, GLuint mask, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glStencilFunc( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glStencilFunc( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 380 );
     if( breakpoint >= 0 ) {
@@ -2279,7 +2370,9 @@ void gldlStencilFunc ( GLenum func, GLint ref, GLuint mask, const char *arg0, co
 }
 
 void gldlStencilOp ( GLenum fail, GLenum zfail, GLenum zpass, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glStencilOp( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glStencilOp( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 384 );
     if( breakpoint >= 0 ) {
@@ -2290,7 +2383,9 @@ void gldlStencilOp ( GLenum fail, GLenum zfail, GLenum zpass, const char *arg0, 
 }
 
 void gldlDepthFunc ( GLenum func, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDepthFunc( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDepthFunc( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 90 );
     if( breakpoint >= 0 ) {
@@ -2301,7 +2396,9 @@ void gldlDepthFunc ( GLenum func, const char *arg0, const char *file, int line )
 }
 
 void gldlPixelStoref ( GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPixelStoref( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPixelStoref( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 293 );
     if( breakpoint >= 0 ) {
@@ -2312,7 +2409,9 @@ void gldlPixelStoref ( GLenum pname, GLfloat param, const char *arg0, const char
 }
 
 void gldlPixelStorei ( GLenum pname, GLint param, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPixelStorei( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPixelStorei( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 294 );
     if( breakpoint >= 0 ) {
@@ -2323,7 +2422,9 @@ void gldlPixelStorei ( GLenum pname, GLint param, const char *arg0, const char *
 }
 
 void gldlReadBuffer ( GLenum mode, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glReadBuffer( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glReadBuffer( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 357 );
     if( breakpoint >= 0 ) {
@@ -2334,7 +2435,9 @@ void gldlReadBuffer ( GLenum mode, const char *arg0, const char *file, int line 
 }
 
 void gldlReadPixels ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glReadPixels( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glReadPixels( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 358 );
     if( breakpoint >= 0 ) {
@@ -2345,7 +2448,9 @@ void gldlReadPixels ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum fo
 }
 
 void gldlGetBooleanv ( GLenum pname, GLboolean *params, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetBooleanv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetBooleanv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 160 );
     if( breakpoint >= 0 ) {
@@ -2356,7 +2461,9 @@ void gldlGetBooleanv ( GLenum pname, GLboolean *params, const char *arg0, const 
 }
 
 void gldlGetDoublev ( GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetDoublev( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetDoublev( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 168 );
     if( breakpoint >= 0 ) {
@@ -2367,7 +2474,9 @@ void gldlGetDoublev ( GLenum pname, GLdouble *params, const char *arg0, const ch
 }
 
 GLenum gldlGetError ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetError();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetError();\n", file, line );
 
     int breakpoint = DebugTest( 169 );
     if( breakpoint >= 0 ) {
@@ -2378,7 +2487,9 @@ GLenum gldlGetError ( const char *file, int line ) {
 }
 
 void gldlGetFloatv ( GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetFloatv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetFloatv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 171 );
     if( breakpoint >= 0 ) {
@@ -2389,7 +2500,9 @@ void gldlGetFloatv ( GLenum pname, GLfloat *params, const char *arg0, const char
 }
 
 void gldlGetIntegerv ( GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetIntegerv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetIntegerv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 179 );
     if( breakpoint >= 0 ) {
@@ -2400,7 +2513,9 @@ void gldlGetIntegerv ( GLenum pname, GLint *params, const char *arg0, const char
 }
 
 const GLubyte * gldlGetString ( GLenum name, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetString( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetString( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 206 );
     if( breakpoint >= 0 ) {
@@ -2411,7 +2526,9 @@ const GLubyte * gldlGetString ( GLenum name, const char *arg0, const char *file,
 }
 
 void gldlGetTexImage ( GLenum target, GLint level, GLenum format, GLenum type, GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetTexImage( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetTexImage( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 211 );
     if( breakpoint >= 0 ) {
@@ -2422,7 +2539,9 @@ void gldlGetTexImage ( GLenum target, GLint level, GLenum format, GLenum type, G
 }
 
 void gldlGetTexParameterfv ( GLenum target, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetTexParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetTexParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 216 );
     if( breakpoint >= 0 ) {
@@ -2433,7 +2552,9 @@ void gldlGetTexParameterfv ( GLenum target, GLenum pname, GLfloat *params, const
 }
 
 void gldlGetTexParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetTexParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetTexParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 217 );
     if( breakpoint >= 0 ) {
@@ -2444,7 +2565,9 @@ void gldlGetTexParameteriv ( GLenum target, GLenum pname, GLint *params, const c
 }
 
 void gldlGetTexLevelParameterfv ( GLenum target, GLint level, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetTexLevelParameterfv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetTexLevelParameterfv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 212 );
     if( breakpoint >= 0 ) {
@@ -2455,7 +2578,9 @@ void gldlGetTexLevelParameterfv ( GLenum target, GLint level, GLenum pname, GLfl
 }
 
 void gldlGetTexLevelParameteriv ( GLenum target, GLint level, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetTexLevelParameteriv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetTexLevelParameteriv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 213 );
     if( breakpoint >= 0 ) {
@@ -2466,7 +2591,9 @@ void gldlGetTexLevelParameteriv ( GLenum target, GLint level, GLenum pname, GLin
 }
 
 GLboolean gldlIsEnabled ( GLenum cap, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsEnabled( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsEnabled( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 254 );
     if( breakpoint >= 0 ) {
@@ -2477,7 +2604,9 @@ GLboolean gldlIsEnabled ( GLenum cap, const char *arg0, const char *file, int li
 }
 
 void gldlDepthRange ( GLclampd near, GLclampd far, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDepthRange( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDepthRange( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 92 );
     if( breakpoint >= 0 ) {
@@ -2488,7 +2617,9 @@ void gldlDepthRange ( GLclampd near, GLclampd far, const char *arg0, const char 
 }
 
 void gldlViewport ( GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glViewport( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glViewport( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 555 );
     if( breakpoint >= 0 ) {
@@ -2499,7 +2630,9 @@ void gldlViewport ( GLint x, GLint y, GLsizei width, GLsizei height, const char 
 }
 
 void gldlDrawArrays ( GLenum mode, GLint first, GLsizei count, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawArrays( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawArrays( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 100 );
     if( breakpoint >= 0 ) {
@@ -2510,7 +2643,9 @@ void gldlDrawArrays ( GLenum mode, GLint first, GLsizei count, const char *arg0,
 }
 
 void gldlDrawElements ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawElements( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawElements( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 106 );
     if( breakpoint >= 0 ) {
@@ -2521,7 +2656,9 @@ void gldlDrawElements ( GLenum mode, GLsizei count, GLenum type, const GLvoid *i
 }
 
 void gldlGetPointerv ( GLenum pname, GLvoid* *params, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetPointerv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetPointerv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 184 );
     if( breakpoint >= 0 ) {
@@ -2532,7 +2669,9 @@ void gldlGetPointerv ( GLenum pname, GLvoid* *params, const char *arg0, const ch
 }
 
 void gldlPolygonOffset ( GLfloat factor, GLfloat units, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPolygonOffset( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPolygonOffset( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 301 );
     if( breakpoint >= 0 ) {
@@ -2543,7 +2682,9 @@ void gldlPolygonOffset ( GLfloat factor, GLfloat units, const char *arg0, const 
 }
 
 void gldlCopyTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLint border, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCopyTexImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCopyTexImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 64 );
     if( breakpoint >= 0 ) {
@@ -2554,7 +2695,9 @@ void gldlCopyTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLi
 }
 
 void gldlCopyTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCopyTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCopyTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
     int breakpoint = DebugTest( 65 );
     if( breakpoint >= 0 ) {
@@ -2565,7 +2708,9 @@ void gldlCopyTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLi
 }
 
 void gldlCopyTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLint x, GLint y, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCopyTexSubImage1D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCopyTexSubImage1D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 66 );
     if( breakpoint >= 0 ) {
@@ -2576,7 +2721,9 @@ void gldlCopyTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLint x,
 }
 
 void gldlCopyTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCopyTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCopyTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
     int breakpoint = DebugTest( 67 );
     if( breakpoint >= 0 ) {
@@ -2587,7 +2734,9 @@ void gldlCopyTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yo
 }
 
 void gldlTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexSubImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexSubImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 409 );
     if( breakpoint >= 0 ) {
@@ -2598,7 +2747,9 @@ void gldlTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei widt
 }
 
 void gldlTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
     int breakpoint = DebugTest( 410 );
     if( breakpoint >= 0 ) {
@@ -2609,7 +2760,9 @@ void gldlTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffse
 }
 
 void gldlBindTexture ( GLenum target, GLuint texture, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindTexture( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindTexture( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 18 );
     if( breakpoint >= 0 ) {
@@ -2620,7 +2773,9 @@ void gldlBindTexture ( GLenum target, GLuint texture, const char *arg0, const ch
 }
 
 void gldlDeleteTextures ( GLsizei n, const GLuint *textures, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteTextures( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteTextures( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 87 );
     if( breakpoint >= 0 ) {
@@ -2631,7 +2786,9 @@ void gldlDeleteTextures ( GLsizei n, const GLuint *textures, const char *arg0, c
 }
 
 void gldlGenTextures ( GLsizei n, GLuint *textures, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenTextures( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenTextures( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 143 );
     if( breakpoint >= 0 ) {
@@ -2642,7 +2799,9 @@ void gldlGenTextures ( GLsizei n, GLuint *textures, const char *arg0, const char
 }
 
 GLboolean gldlIsTexture ( GLuint texture, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsTexture( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsTexture( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 265 );
     if( breakpoint >= 0 ) {
@@ -2653,7 +2812,9 @@ GLboolean gldlIsTexture ( GLuint texture, const char *arg0, const char *file, in
 }
 
 void gldlBlendColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendColor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendColor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 21 );
     if( breakpoint >= 0 ) {
@@ -2664,7 +2825,9 @@ void gldlBlendColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alph
 }
 
 void gldlBlendEquation ( GLenum mode, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendEquation( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendEquation( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 22 );
     if( breakpoint >= 0 ) {
@@ -2675,7 +2838,9 @@ void gldlBlendEquation ( GLenum mode, const char *arg0, const char *file, int li
 }
 
 void gldlDrawRangeElements ( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawRangeElements( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawRangeElements( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 113 );
     if( breakpoint >= 0 ) {
@@ -2686,7 +2851,9 @@ void gldlDrawRangeElements ( GLenum mode, GLuint start, GLuint end, GLsizei coun
 }
 
 void gldlTexImage3D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,  arg9 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,  arg9 );
 
     int breakpoint = DebugTest( 398 );
     if( breakpoint >= 0 ) {
@@ -2697,7 +2864,9 @@ void gldlTexImage3D ( GLenum target, GLint level, GLint internalformat, GLsizei 
 }
 
 void gldlTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *arg10, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9,  arg10 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9,  arg10 );
 
     int breakpoint = DebugTest( 411 );
     if( breakpoint >= 0 ) {
@@ -2708,7 +2877,9 @@ void gldlTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffse
 }
 
 void gldlCopyTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCopyTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCopyTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
     int breakpoint = DebugTest( 68 );
     if( breakpoint >= 0 ) {
@@ -2719,7 +2890,9 @@ void gldlCopyTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yo
 }
 
 void gldlActiveTexture ( GLenum texture, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glActiveTexture( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glActiveTexture( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 1 );
     if( breakpoint >= 0 ) {
@@ -2730,7 +2903,9 @@ void gldlActiveTexture ( GLenum texture, const char *arg0, const char *file, int
 }
 
 void gldlSampleCoverage ( GLclampf value, GLboolean invert, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSampleCoverage( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSampleCoverage( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 364 );
     if( breakpoint >= 0 ) {
@@ -2741,7 +2916,9 @@ void gldlSampleCoverage ( GLclampf value, GLboolean invert, const char *arg0, co
 }
 
 void gldlCompressedTexImage3D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCompressedTexImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCompressedTexImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
     int breakpoint = DebugTest( 59 );
     if( breakpoint >= 0 ) {
@@ -2752,7 +2929,9 @@ void gldlCompressedTexImage3D ( GLenum target, GLint level, GLenum internalforma
 }
 
 void gldlCompressedTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCompressedTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCompressedTexImage2D( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
     int breakpoint = DebugTest( 58 );
     if( breakpoint >= 0 ) {
@@ -2763,7 +2942,9 @@ void gldlCompressedTexImage2D ( GLenum target, GLint level, GLenum internalforma
 }
 
 void gldlCompressedTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCompressedTexImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCompressedTexImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 57 );
     if( breakpoint >= 0 ) {
@@ -2774,7 +2955,9 @@ void gldlCompressedTexImage1D ( GLenum target, GLint level, GLenum internalforma
 }
 
 void gldlCompressedTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *arg10, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9,  arg10 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCompressedTexSubImage3D( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9,  arg10 );
 
     int breakpoint = DebugTest( 62 );
     if( breakpoint >= 0 ) {
@@ -2785,7 +2968,9 @@ void gldlCompressedTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GL
 }
 
 void gldlCompressedTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCompressedTexSubImage2D( %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,  arg8 );
 
     int breakpoint = DebugTest( 61 );
     if( breakpoint >= 0 ) {
@@ -2796,7 +2981,9 @@ void gldlCompressedTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GL
 }
 
 void gldlCompressedTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCompressedTexSubImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCompressedTexSubImage1D( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 60 );
     if( breakpoint >= 0 ) {
@@ -2807,7 +2994,9 @@ void gldlCompressedTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GL
 }
 
 void gldlGetCompressedTexImage ( GLenum target, GLint level, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetCompressedTexImage( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetCompressedTexImage( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 165 );
     if( breakpoint >= 0 ) {
@@ -2818,7 +3007,9 @@ void gldlGetCompressedTexImage ( GLenum target, GLint level, GLvoid *img, const 
 }
 
 void gldlBlendFuncSeparate ( GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendFuncSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendFuncSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 29 );
     if( breakpoint >= 0 ) {
@@ -2829,7 +3020,9 @@ void gldlBlendFuncSeparate ( GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfacto
 }
 
 void gldlMultiDrawArrays ( GLenum mode, const GLint *first, const GLsizei *count, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiDrawArrays( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiDrawArrays( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 276 );
     if( breakpoint >= 0 ) {
@@ -2840,7 +3033,9 @@ void gldlMultiDrawArrays ( GLenum mode, const GLint *first, const GLsizei *count
 }
 
 void gldlMultiDrawElements ( GLenum mode, const GLsizei *count, GLenum type, const GLvoid* *indices, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiDrawElements( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiDrawElements( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 277 );
     if( breakpoint >= 0 ) {
@@ -2851,7 +3046,9 @@ void gldlMultiDrawElements ( GLenum mode, const GLsizei *count, GLenum type, con
 }
 
 void gldlPointParameterf ( GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPointParameterf( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPointParameterf( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 295 );
     if( breakpoint >= 0 ) {
@@ -2862,7 +3059,9 @@ void gldlPointParameterf ( GLenum pname, GLfloat param, const char *arg0, const 
 }
 
 void gldlPointParameterfv ( GLenum pname, const GLfloat *params, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPointParameterfv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPointParameterfv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 296 );
     if( breakpoint >= 0 ) {
@@ -2873,7 +3072,9 @@ void gldlPointParameterfv ( GLenum pname, const GLfloat *params, const char *arg
 }
 
 void gldlPointParameteri ( GLenum pname, GLint param, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPointParameteri( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPointParameteri( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 297 );
     if( breakpoint >= 0 ) {
@@ -2884,7 +3085,9 @@ void gldlPointParameteri ( GLenum pname, GLint param, const char *arg0, const ch
 }
 
 void gldlPointParameteriv ( GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPointParameteriv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPointParameteriv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 298 );
     if( breakpoint >= 0 ) {
@@ -2895,7 +3098,9 @@ void gldlPointParameteriv ( GLenum pname, const GLint *params, const char *arg0,
 }
 
 void gldlGenQueries ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenQueries( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenQueries( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 140 );
     if( breakpoint >= 0 ) {
@@ -2906,7 +3111,9 @@ void gldlGenQueries ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1
 }
 
 void gldlDeleteQueries ( GLsizei n, const GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteQueries( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteQueries( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 82 );
     if( breakpoint >= 0 ) {
@@ -2917,7 +3124,9 @@ void gldlDeleteQueries ( GLsizei n, const GLuint *ids, const char *arg0, const c
 }
 
 GLboolean gldlIsQuery ( GLuint id, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsQuery( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsQuery( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 260 );
     if( breakpoint >= 0 ) {
@@ -2928,7 +3137,9 @@ GLboolean gldlIsQuery ( GLuint id, const char *arg0, const char *file, int line 
 }
 
 void gldlBeginQuery ( GLenum target, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBeginQuery( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBeginQuery( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 4 );
     if( breakpoint >= 0 ) {
@@ -2939,7 +3150,9 @@ void gldlBeginQuery ( GLenum target, GLuint id, const char *arg0, const char *ar
 }
 
 void gldlEndQuery ( GLenum target, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glEndQuery( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glEndQuery( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 123 );
     if( breakpoint >= 0 ) {
@@ -2950,7 +3163,9 @@ void gldlEndQuery ( GLenum target, const char *arg0, const char *file, int line 
 }
 
 void gldlGetQueryiv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetQueryiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetQueryiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 196 );
     if( breakpoint >= 0 ) {
@@ -2961,7 +3176,9 @@ void gldlGetQueryiv ( GLenum target, GLenum pname, GLint *params, const char *ar
 }
 
 void gldlGetQueryObjectiv ( GLuint id, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetQueryObjectiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetQueryObjectiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 193 );
     if( breakpoint >= 0 ) {
@@ -2972,7 +3189,9 @@ void gldlGetQueryObjectiv ( GLuint id, GLenum pname, GLint *params, const char *
 }
 
 void gldlGetQueryObjectuiv ( GLuint id, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetQueryObjectuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetQueryObjectuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 195 );
     if( breakpoint >= 0 ) {
@@ -2983,7 +3202,9 @@ void gldlGetQueryObjectuiv ( GLuint id, GLenum pname, GLuint *params, const char
 }
 
 void gldlBindBuffer ( GLenum target, GLuint buffer, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindBuffer( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindBuffer( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 8 );
     if( breakpoint >= 0 ) {
@@ -2994,7 +3215,9 @@ void gldlBindBuffer ( GLenum target, GLuint buffer, const char *arg0, const char
 }
 
 void gldlDeleteBuffers ( GLsizei n, const GLuint *buffers, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteBuffers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteBuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 77 );
     if( breakpoint >= 0 ) {
@@ -3005,7 +3228,9 @@ void gldlDeleteBuffers ( GLsizei n, const GLuint *buffers, const char *arg0, con
 }
 
 void gldlGenBuffers ( GLsizei n, GLuint *buffers, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenBuffers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenBuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 137 );
     if( breakpoint >= 0 ) {
@@ -3016,7 +3241,9 @@ void gldlGenBuffers ( GLsizei n, GLuint *buffers, const char *arg0, const char *
 }
 
 GLboolean gldlIsBuffer ( GLuint buffer, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsBuffer( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsBuffer( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 253 );
     if( breakpoint >= 0 ) {
@@ -3027,7 +3254,9 @@ GLboolean gldlIsBuffer ( GLuint buffer, const char *arg0, const char *file, int 
 }
 
 void gldlBufferData ( GLenum target, GLsizeiptr size, const GLvoid *data, GLenum usage, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBufferData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBufferData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 35 );
     if( breakpoint >= 0 ) {
@@ -3038,7 +3267,9 @@ void gldlBufferData ( GLenum target, GLsizeiptr size, const GLvoid *data, GLenum
 }
 
 void gldlBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBufferSubData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBufferSubData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 36 );
     if( breakpoint >= 0 ) {
@@ -3049,7 +3280,9 @@ void gldlBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, const 
 }
 
 void gldlGetBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetBufferSubData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetBufferSubData( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 164 );
     if( breakpoint >= 0 ) {
@@ -3060,7 +3293,9 @@ void gldlGetBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, GLv
 }
 
 GLvoid* gldlMapBuffer ( GLenum target, GLenum access, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMapBuffer( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMapBuffer( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 271 );
     if( breakpoint >= 0 ) {
@@ -3071,7 +3306,9 @@ GLvoid* gldlMapBuffer ( GLenum target, GLenum access, const char *arg0, const ch
 }
 
 GLboolean gldlUnmapBuffer ( GLenum target, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUnmapBuffer( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUnmapBuffer( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 468 );
     if( breakpoint >= 0 ) {
@@ -3082,7 +3319,9 @@ GLboolean gldlUnmapBuffer ( GLenum target, const char *arg0, const char *file, i
 }
 
 void gldlGetBufferParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetBufferParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetBufferParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 162 );
     if( breakpoint >= 0 ) {
@@ -3093,7 +3332,9 @@ void gldlGetBufferParameteriv ( GLenum target, GLenum pname, GLint *params, cons
 }
 
 void gldlGetBufferPointerv ( GLenum target, GLenum pname, GLvoid* *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetBufferPointerv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetBufferPointerv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 163 );
     if( breakpoint >= 0 ) {
@@ -3104,7 +3345,9 @@ void gldlGetBufferPointerv ( GLenum target, GLenum pname, GLvoid* *params, const
 }
 
 void gldlBlendEquationSeparate ( GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendEquationSeparate( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendEquationSeparate( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 23 );
     if( breakpoint >= 0 ) {
@@ -3115,7 +3358,9 @@ void gldlBlendEquationSeparate ( GLenum modeRGB, GLenum modeAlpha, const char *a
 }
 
 void gldlDrawBuffers ( GLsizei n, const GLenum *bufs, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawBuffers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawBuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 105 );
     if( breakpoint >= 0 ) {
@@ -3126,7 +3371,9 @@ void gldlDrawBuffers ( GLsizei n, const GLenum *bufs, const char *arg0, const ch
 }
 
 void gldlStencilOpSeparate ( GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glStencilOpSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glStencilOpSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 385 );
     if( breakpoint >= 0 ) {
@@ -3137,7 +3384,9 @@ void gldlStencilOpSeparate ( GLenum face, GLenum sfail, GLenum dpfail, GLenum dp
 }
 
 void gldlStencilFuncSeparate ( GLenum face, GLenum func, GLint ref, GLuint mask, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glStencilFuncSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glStencilFuncSeparate( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 381 );
     if( breakpoint >= 0 ) {
@@ -3148,7 +3397,9 @@ void gldlStencilFuncSeparate ( GLenum face, GLenum func, GLint ref, GLuint mask,
 }
 
 void gldlStencilMaskSeparate ( GLenum face, GLuint mask, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glStencilMaskSeparate( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glStencilMaskSeparate( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 383 );
     if( breakpoint >= 0 ) {
@@ -3159,7 +3410,9 @@ void gldlStencilMaskSeparate ( GLenum face, GLuint mask, const char *arg0, const
 }
 
 void gldlAttachShader ( GLuint program, GLuint shader, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glAttachShader( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glAttachShader( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 2 );
     if( breakpoint >= 0 ) {
@@ -3170,7 +3423,9 @@ void gldlAttachShader ( GLuint program, GLuint shader, const char *arg0, const c
 }
 
 void gldlBindAttribLocation ( GLuint program, GLuint index, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindAttribLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindAttribLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 7 );
     if( breakpoint >= 0 ) {
@@ -3181,7 +3436,9 @@ void gldlBindAttribLocation ( GLuint program, GLuint index, const GLchar *name, 
 }
 
 void gldlCompileShader ( GLuint shader, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCompileShader( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCompileShader( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 55 );
     if( breakpoint >= 0 ) {
@@ -3192,7 +3449,9 @@ void gldlCompileShader ( GLuint shader, const char *arg0, const char *file, int 
 }
 
 GLuint gldlCreateProgram ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCreateProgram();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCreateProgram();\n", file, line );
 
     int breakpoint = DebugTest( 69 );
     if( breakpoint >= 0 ) {
@@ -3203,7 +3462,9 @@ GLuint gldlCreateProgram ( const char *file, int line ) {
 }
 
 GLuint gldlCreateShader ( GLenum type, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCreateShader( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCreateShader( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 70 );
     if( breakpoint >= 0 ) {
@@ -3214,7 +3475,9 @@ GLuint gldlCreateShader ( GLenum type, const char *arg0, const char *file, int l
 }
 
 void gldlDeleteProgram ( GLuint program, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteProgram( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteProgram( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 80 );
     if( breakpoint >= 0 ) {
@@ -3225,7 +3488,9 @@ void gldlDeleteProgram ( GLuint program, const char *arg0, const char *file, int
 }
 
 void gldlDeleteShader ( GLuint shader, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteShader( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteShader( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 85 );
     if( breakpoint >= 0 ) {
@@ -3236,7 +3501,9 @@ void gldlDeleteShader ( GLuint shader, const char *arg0, const char *file, int l
 }
 
 void gldlDetachShader ( GLuint program, GLuint shader, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDetachShader( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDetachShader( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 96 );
     if( breakpoint >= 0 ) {
@@ -3247,7 +3514,9 @@ void gldlDetachShader ( GLuint program, GLuint shader, const char *arg0, const c
 }
 
 void gldlDisableVertexAttribArray ( GLuint index, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDisableVertexAttribArray( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDisableVertexAttribArray( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 98 );
     if( breakpoint >= 0 ) {
@@ -3258,7 +3527,9 @@ void gldlDisableVertexAttribArray ( GLuint index, const char *arg0, const char *
 }
 
 void gldlEnableVertexAttribArray ( GLuint index, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glEnableVertexAttribArray( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glEnableVertexAttribArray( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 120 );
     if( breakpoint >= 0 ) {
@@ -3269,7 +3540,9 @@ void gldlEnableVertexAttribArray ( GLuint index, const char *arg0, const char *f
 }
 
 void gldlGetActiveAttrib ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveAttrib( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveAttrib( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 148 );
     if( breakpoint >= 0 ) {
@@ -3280,7 +3553,9 @@ void gldlGetActiveAttrib ( GLuint program, GLuint index, GLsizei bufSize, GLsize
 }
 
 void gldlGetActiveUniform ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveUniform( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveUniform( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 152 );
     if( breakpoint >= 0 ) {
@@ -3291,7 +3566,9 @@ void gldlGetActiveUniform ( GLuint program, GLuint index, GLsizei bufSize, GLsiz
 }
 
 void gldlGetAttachedShaders ( GLuint program, GLsizei maxCount, GLsizei *count, GLuint *obj, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetAttachedShaders( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetAttachedShaders( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 157 );
     if( breakpoint >= 0 ) {
@@ -3302,7 +3579,9 @@ void gldlGetAttachedShaders ( GLuint program, GLsizei maxCount, GLsizei *count, 
 }
 
 GLint gldlGetAttribLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetAttribLocation( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetAttribLocation( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 158 );
     if( breakpoint >= 0 ) {
@@ -3313,7 +3592,9 @@ GLint gldlGetAttribLocation ( GLuint program, const GLchar *name, const char *ar
 }
 
 void gldlGetProgramiv ( GLuint program, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetProgramiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetProgramiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 190 );
     if( breakpoint >= 0 ) {
@@ -3324,7 +3605,9 @@ void gldlGetProgramiv ( GLuint program, GLenum pname, GLint *params, const char 
 }
 
 void gldlGetProgramInfoLog ( GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetProgramInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetProgramInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 186 );
     if( breakpoint >= 0 ) {
@@ -3335,7 +3618,9 @@ void gldlGetProgramInfoLog ( GLuint program, GLsizei bufSize, GLsizei *length, G
 }
 
 void gldlGetShaderiv ( GLuint shader, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetShaderiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetShaderiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 205 );
     if( breakpoint >= 0 ) {
@@ -3346,7 +3631,9 @@ void gldlGetShaderiv ( GLuint shader, GLenum pname, GLint *params, const char *a
 }
 
 void gldlGetShaderInfoLog ( GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetShaderInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetShaderInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 202 );
     if( breakpoint >= 0 ) {
@@ -3357,7 +3644,9 @@ void gldlGetShaderInfoLog ( GLuint shader, GLsizei bufSize, GLsizei *length, GLc
 }
 
 void gldlGetShaderSource ( GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetShaderSource( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetShaderSource( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 204 );
     if( breakpoint >= 0 ) {
@@ -3368,7 +3657,9 @@ void gldlGetShaderSource ( GLuint shader, GLsizei bufSize, GLsizei *length, GLch
 }
 
 GLint gldlGetUniformLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetUniformLocation( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetUniformLocation( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 221 );
     if( breakpoint >= 0 ) {
@@ -3379,7 +3670,9 @@ GLint gldlGetUniformLocation ( GLuint program, const GLchar *name, const char *a
 }
 
 void gldlGetUniformfv ( GLuint program, GLint location, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetUniformfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetUniformfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 224 );
     if( breakpoint >= 0 ) {
@@ -3390,7 +3683,9 @@ void gldlGetUniformfv ( GLuint program, GLint location, GLfloat *params, const c
 }
 
 void gldlGetUniformiv ( GLuint program, GLint location, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetUniformiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetUniformiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 225 );
     if( breakpoint >= 0 ) {
@@ -3401,7 +3696,9 @@ void gldlGetUniformiv ( GLuint program, GLint location, GLint *params, const cha
 }
 
 void gldlGetVertexAttribdv ( GLuint index, GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetVertexAttribdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetVertexAttribdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 231 );
     if( breakpoint >= 0 ) {
@@ -3412,7 +3709,9 @@ void gldlGetVertexAttribdv ( GLuint index, GLenum pname, GLdouble *params, const
 }
 
 void gldlGetVertexAttribfv ( GLuint index, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetVertexAttribfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetVertexAttribfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 232 );
     if( breakpoint >= 0 ) {
@@ -3423,7 +3722,9 @@ void gldlGetVertexAttribfv ( GLuint index, GLenum pname, GLfloat *params, const 
 }
 
 void gldlGetVertexAttribiv ( GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetVertexAttribiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetVertexAttribiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 233 );
     if( breakpoint >= 0 ) {
@@ -3434,7 +3735,9 @@ void gldlGetVertexAttribiv ( GLuint index, GLenum pname, GLint *params, const ch
 }
 
 void gldlGetVertexAttribPointerv ( GLuint index, GLenum pname, GLvoid* *pointer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetVertexAttribPointerv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetVertexAttribPointerv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 230 );
     if( breakpoint >= 0 ) {
@@ -3445,7 +3748,9 @@ void gldlGetVertexAttribPointerv ( GLuint index, GLenum pname, GLvoid* *pointer,
 }
 
 GLboolean gldlIsProgram ( GLuint program, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsProgram( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsProgram( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 258 );
     if( breakpoint >= 0 ) {
@@ -3456,7 +3761,9 @@ GLboolean gldlIsProgram ( GLuint program, const char *arg0, const char *file, in
 }
 
 GLboolean gldlIsShader ( GLuint shader, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsShader( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsShader( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 263 );
     if( breakpoint >= 0 ) {
@@ -3467,7 +3774,9 @@ GLboolean gldlIsShader ( GLuint shader, const char *arg0, const char *file, int 
 }
 
 void gldlLinkProgram ( GLuint program, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glLinkProgram( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glLinkProgram( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 269 );
     if( breakpoint >= 0 ) {
@@ -3478,7 +3787,9 @@ void gldlLinkProgram ( GLuint program, const char *arg0, const char *file, int l
 }
 
 void gldlShaderSource ( GLuint shader, GLsizei count, const GLchar* *string, const GLint *length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glShaderSource( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glShaderSource( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 379 );
     if( breakpoint >= 0 ) {
@@ -3489,7 +3800,9 @@ void gldlShaderSource ( GLuint shader, GLsizei count, const GLchar* *string, con
 }
 
 void gldlUseProgram ( GLuint program, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUseProgram( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUseProgram( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 469 );
     if( breakpoint >= 0 ) {
@@ -3500,7 +3813,9 @@ void gldlUseProgram ( GLuint program, const char *arg0, const char *file, int li
 }
 
 void gldlUniform1f ( GLint location, GLfloat v0, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform1f( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform1f( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 418 );
     if( breakpoint >= 0 ) {
@@ -3511,7 +3826,9 @@ void gldlUniform1f ( GLint location, GLfloat v0, const char *arg0, const char *a
 }
 
 void gldlUniform2f ( GLint location, GLfloat v0, GLfloat v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform2f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform2f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 426 );
     if( breakpoint >= 0 ) {
@@ -3522,7 +3839,9 @@ void gldlUniform2f ( GLint location, GLfloat v0, GLfloat v1, const char *arg0, c
 }
 
 void gldlUniform3f ( GLint location, GLfloat v0, GLfloat v1, GLfloat v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform3f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform3f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 434 );
     if( breakpoint >= 0 ) {
@@ -3533,7 +3852,9 @@ void gldlUniform3f ( GLint location, GLfloat v0, GLfloat v1, GLfloat v2, const c
 }
 
 void gldlUniform4f ( GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform4f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform4f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 442 );
     if( breakpoint >= 0 ) {
@@ -3544,7 +3865,9 @@ void gldlUniform4f ( GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat
 }
 
 void gldlUniform1i ( GLint location, GLint v0, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform1i( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform1i( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 420 );
     if( breakpoint >= 0 ) {
@@ -3555,7 +3878,9 @@ void gldlUniform1i ( GLint location, GLint v0, const char *arg0, const char *arg
 }
 
 void gldlUniform2i ( GLint location, GLint v0, GLint v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform2i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform2i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 428 );
     if( breakpoint >= 0 ) {
@@ -3566,7 +3891,9 @@ void gldlUniform2i ( GLint location, GLint v0, GLint v1, const char *arg0, const
 }
 
 void gldlUniform3i ( GLint location, GLint v0, GLint v1, GLint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform3i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform3i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 436 );
     if( breakpoint >= 0 ) {
@@ -3577,7 +3904,9 @@ void gldlUniform3i ( GLint location, GLint v0, GLint v1, GLint v2, const char *a
 }
 
 void gldlUniform4i ( GLint location, GLint v0, GLint v1, GLint v2, GLint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform4i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform4i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 444 );
     if( breakpoint >= 0 ) {
@@ -3588,7 +3917,9 @@ void gldlUniform4i ( GLint location, GLint v0, GLint v1, GLint v2, GLint v3, con
 }
 
 void gldlUniform1fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform1fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform1fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 419 );
     if( breakpoint >= 0 ) {
@@ -3599,7 +3930,9 @@ void gldlUniform1fv ( GLint location, GLsizei count, const GLfloat *value, const
 }
 
 void gldlUniform2fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform2fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform2fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 427 );
     if( breakpoint >= 0 ) {
@@ -3610,7 +3943,9 @@ void gldlUniform2fv ( GLint location, GLsizei count, const GLfloat *value, const
 }
 
 void gldlUniform3fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform3fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform3fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 435 );
     if( breakpoint >= 0 ) {
@@ -3621,7 +3956,9 @@ void gldlUniform3fv ( GLint location, GLsizei count, const GLfloat *value, const
 }
 
 void gldlUniform4fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform4fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform4fv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 443 );
     if( breakpoint >= 0 ) {
@@ -3632,7 +3969,9 @@ void gldlUniform4fv ( GLint location, GLsizei count, const GLfloat *value, const
 }
 
 void gldlUniform1iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform1iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform1iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 421 );
     if( breakpoint >= 0 ) {
@@ -3643,7 +3982,9 @@ void gldlUniform1iv ( GLint location, GLsizei count, const GLint *value, const c
 }
 
 void gldlUniform2iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform2iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform2iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 429 );
     if( breakpoint >= 0 ) {
@@ -3654,7 +3995,9 @@ void gldlUniform2iv ( GLint location, GLsizei count, const GLint *value, const c
 }
 
 void gldlUniform3iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform3iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform3iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 437 );
     if( breakpoint >= 0 ) {
@@ -3665,7 +4008,9 @@ void gldlUniform3iv ( GLint location, GLsizei count, const GLint *value, const c
 }
 
 void gldlUniform4iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform4iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform4iv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 445 );
     if( breakpoint >= 0 ) {
@@ -3676,7 +4021,9 @@ void gldlUniform4iv ( GLint location, GLsizei count, const GLint *value, const c
 }
 
 void gldlUniformMatrix2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 450 );
     if( breakpoint >= 0 ) {
@@ -3687,7 +4034,9 @@ void gldlUniformMatrix2fv ( GLint location, GLsizei count, GLboolean transpose, 
 }
 
 void gldlUniformMatrix3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 456 );
     if( breakpoint >= 0 ) {
@@ -3698,7 +4047,9 @@ void gldlUniformMatrix3fv ( GLint location, GLsizei count, GLboolean transpose, 
 }
 
 void gldlUniformMatrix4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 462 );
     if( breakpoint >= 0 ) {
@@ -3709,7 +4060,9 @@ void gldlUniformMatrix4fv ( GLint location, GLsizei count, GLboolean transpose, 
 }
 
 void gldlValidateProgram ( GLuint program, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glValidateProgram( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glValidateProgram( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 471 );
     if( breakpoint >= 0 ) {
@@ -3720,7 +4073,9 @@ void gldlValidateProgram ( GLuint program, const char *arg0, const char *file, i
 }
 
 void gldlVertexAttrib1d ( GLuint index, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib1d( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib1d( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 473 );
     if( breakpoint >= 0 ) {
@@ -3731,7 +4086,9 @@ void gldlVertexAttrib1d ( GLuint index, GLdouble x, const char *arg0, const char
 }
 
 void gldlVertexAttrib1dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib1dv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib1dv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 474 );
     if( breakpoint >= 0 ) {
@@ -3742,7 +4099,9 @@ void gldlVertexAttrib1dv ( GLuint index, const GLdouble *v, const char *arg0, co
 }
 
 void gldlVertexAttrib1f ( GLuint index, GLfloat x, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib1f( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib1f( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 475 );
     if( breakpoint >= 0 ) {
@@ -3753,7 +4112,9 @@ void gldlVertexAttrib1f ( GLuint index, GLfloat x, const char *arg0, const char 
 }
 
 void gldlVertexAttrib1fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib1fv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib1fv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 476 );
     if( breakpoint >= 0 ) {
@@ -3764,7 +4125,9 @@ void gldlVertexAttrib1fv ( GLuint index, const GLfloat *v, const char *arg0, con
 }
 
 void gldlVertexAttrib1s ( GLuint index, GLshort x, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib1s( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib1s( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 477 );
     if( breakpoint >= 0 ) {
@@ -3775,7 +4138,9 @@ void gldlVertexAttrib1s ( GLuint index, GLshort x, const char *arg0, const char 
 }
 
 void gldlVertexAttrib1sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib1sv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib1sv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 478 );
     if( breakpoint >= 0 ) {
@@ -3786,7 +4151,9 @@ void gldlVertexAttrib1sv ( GLuint index, const GLshort *v, const char *arg0, con
 }
 
 void gldlVertexAttrib2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 479 );
     if( breakpoint >= 0 ) {
@@ -3797,7 +4164,9 @@ void gldlVertexAttrib2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0
 }
 
 void gldlVertexAttrib2dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib2dv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib2dv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 480 );
     if( breakpoint >= 0 ) {
@@ -3808,7 +4177,9 @@ void gldlVertexAttrib2dv ( GLuint index, const GLdouble *v, const char *arg0, co
 }
 
 void gldlVertexAttrib2f ( GLuint index, GLfloat x, GLfloat y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib2f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib2f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 481 );
     if( breakpoint >= 0 ) {
@@ -3819,7 +4190,9 @@ void gldlVertexAttrib2f ( GLuint index, GLfloat x, GLfloat y, const char *arg0, 
 }
 
 void gldlVertexAttrib2fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib2fv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib2fv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 482 );
     if( breakpoint >= 0 ) {
@@ -3830,7 +4203,9 @@ void gldlVertexAttrib2fv ( GLuint index, const GLfloat *v, const char *arg0, con
 }
 
 void gldlVertexAttrib2s ( GLuint index, GLshort x, GLshort y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib2s( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib2s( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 483 );
     if( breakpoint >= 0 ) {
@@ -3841,7 +4216,9 @@ void gldlVertexAttrib2s ( GLuint index, GLshort x, GLshort y, const char *arg0, 
 }
 
 void gldlVertexAttrib2sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib2sv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib2sv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 484 );
     if( breakpoint >= 0 ) {
@@ -3852,7 +4229,9 @@ void gldlVertexAttrib2sv ( GLuint index, const GLshort *v, const char *arg0, con
 }
 
 void gldlVertexAttrib3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 485 );
     if( breakpoint >= 0 ) {
@@ -3863,7 +4242,9 @@ void gldlVertexAttrib3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, cons
 }
 
 void gldlVertexAttrib3dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib3dv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib3dv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 486 );
     if( breakpoint >= 0 ) {
@@ -3874,7 +4255,9 @@ void gldlVertexAttrib3dv ( GLuint index, const GLdouble *v, const char *arg0, co
 }
 
 void gldlVertexAttrib3f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib3f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib3f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 487 );
     if( breakpoint >= 0 ) {
@@ -3885,7 +4268,9 @@ void gldlVertexAttrib3f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, const c
 }
 
 void gldlVertexAttrib3fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib3fv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib3fv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 488 );
     if( breakpoint >= 0 ) {
@@ -3896,7 +4281,9 @@ void gldlVertexAttrib3fv ( GLuint index, const GLfloat *v, const char *arg0, con
 }
 
 void gldlVertexAttrib3s ( GLuint index, GLshort x, GLshort y, GLshort z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib3s( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib3s( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 489 );
     if( breakpoint >= 0 ) {
@@ -3907,7 +4294,9 @@ void gldlVertexAttrib3s ( GLuint index, GLshort x, GLshort y, GLshort z, const c
 }
 
 void gldlVertexAttrib3sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib3sv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib3sv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 490 );
     if( breakpoint >= 0 ) {
@@ -3918,7 +4307,9 @@ void gldlVertexAttrib3sv ( GLuint index, const GLshort *v, const char *arg0, con
 }
 
 void gldlVertexAttrib4Nbv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nbv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4Nbv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 491 );
     if( breakpoint >= 0 ) {
@@ -3929,7 +4320,9 @@ void gldlVertexAttrib4Nbv ( GLuint index, const GLbyte *v, const char *arg0, con
 }
 
 void gldlVertexAttrib4Niv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4Niv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4Niv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 492 );
     if( breakpoint >= 0 ) {
@@ -3940,7 +4333,9 @@ void gldlVertexAttrib4Niv ( GLuint index, const GLint *v, const char *arg0, cons
 }
 
 void gldlVertexAttrib4Nsv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nsv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4Nsv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 493 );
     if( breakpoint >= 0 ) {
@@ -3951,7 +4346,9 @@ void gldlVertexAttrib4Nsv ( GLuint index, const GLshort *v, const char *arg0, co
 }
 
 void gldlVertexAttrib4Nub ( GLuint index, GLubyte x, GLubyte y, GLubyte z, GLubyte w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nub( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4Nub( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 494 );
     if( breakpoint >= 0 ) {
@@ -3962,7 +4359,9 @@ void gldlVertexAttrib4Nub ( GLuint index, GLubyte x, GLubyte y, GLubyte z, GLuby
 }
 
 void gldlVertexAttrib4Nubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nubv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4Nubv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 495 );
     if( breakpoint >= 0 ) {
@@ -3973,7 +4372,9 @@ void gldlVertexAttrib4Nubv ( GLuint index, const GLubyte *v, const char *arg0, c
 }
 
 void gldlVertexAttrib4Nuiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nuiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4Nuiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 496 );
     if( breakpoint >= 0 ) {
@@ -3984,7 +4385,9 @@ void gldlVertexAttrib4Nuiv ( GLuint index, const GLuint *v, const char *arg0, co
 }
 
 void gldlVertexAttrib4Nusv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4Nusv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4Nusv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 497 );
     if( breakpoint >= 0 ) {
@@ -3995,7 +4398,9 @@ void gldlVertexAttrib4Nusv ( GLuint index, const GLushort *v, const char *arg0, 
 }
 
 void gldlVertexAttrib4bv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4bv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4bv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 498 );
     if( breakpoint >= 0 ) {
@@ -4006,7 +4411,9 @@ void gldlVertexAttrib4bv ( GLuint index, const GLbyte *v, const char *arg0, cons
 }
 
 void gldlVertexAttrib4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 499 );
     if( breakpoint >= 0 ) {
@@ -4017,7 +4424,9 @@ void gldlVertexAttrib4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdo
 }
 
 void gldlVertexAttrib4dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4dv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4dv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 500 );
     if( breakpoint >= 0 ) {
@@ -4028,7 +4437,9 @@ void gldlVertexAttrib4dv ( GLuint index, const GLdouble *v, const char *arg0, co
 }
 
 void gldlVertexAttrib4f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 501 );
     if( breakpoint >= 0 ) {
@@ -4039,7 +4450,9 @@ void gldlVertexAttrib4f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat
 }
 
 void gldlVertexAttrib4fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4fv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4fv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 502 );
     if( breakpoint >= 0 ) {
@@ -4050,7 +4463,9 @@ void gldlVertexAttrib4fv ( GLuint index, const GLfloat *v, const char *arg0, con
 }
 
 void gldlVertexAttrib4iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4iv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4iv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 503 );
     if( breakpoint >= 0 ) {
@@ -4061,7 +4476,9 @@ void gldlVertexAttrib4iv ( GLuint index, const GLint *v, const char *arg0, const
 }
 
 void gldlVertexAttrib4s ( GLuint index, GLshort x, GLshort y, GLshort z, GLshort w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4s( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4s( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 504 );
     if( breakpoint >= 0 ) {
@@ -4072,7 +4489,9 @@ void gldlVertexAttrib4s ( GLuint index, GLshort x, GLshort y, GLshort z, GLshort
 }
 
 void gldlVertexAttrib4sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4sv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4sv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 505 );
     if( breakpoint >= 0 ) {
@@ -4083,7 +4502,9 @@ void gldlVertexAttrib4sv ( GLuint index, const GLshort *v, const char *arg0, con
 }
 
 void gldlVertexAttrib4ubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4ubv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4ubv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 506 );
     if( breakpoint >= 0 ) {
@@ -4094,7 +4515,9 @@ void gldlVertexAttrib4ubv ( GLuint index, const GLubyte *v, const char *arg0, co
 }
 
 void gldlVertexAttrib4uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 507 );
     if( breakpoint >= 0 ) {
@@ -4105,7 +4528,9 @@ void gldlVertexAttrib4uiv ( GLuint index, const GLuint *v, const char *arg0, con
 }
 
 void gldlVertexAttrib4usv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttrib4usv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttrib4usv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 508 );
     if( breakpoint >= 0 ) {
@@ -4116,7 +4541,9 @@ void gldlVertexAttrib4usv ( GLuint index, const GLushort *v, const char *arg0, c
 }
 
 void gldlVertexAttribPointer ( GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribPointer( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribPointer( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 548 );
     if( breakpoint >= 0 ) {
@@ -4127,7 +4554,9 @@ void gldlVertexAttribPointer ( GLuint index, GLint size, GLenum type, GLboolean 
 }
 
 void gldlUniformMatrix2x3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix2x3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix2x3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 452 );
     if( breakpoint >= 0 ) {
@@ -4138,7 +4567,9 @@ void gldlUniformMatrix2x3fv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix3x2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix3x2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix3x2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 458 );
     if( breakpoint >= 0 ) {
@@ -4149,7 +4580,9 @@ void gldlUniformMatrix3x2fv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix2x4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix2x4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix2x4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 454 );
     if( breakpoint >= 0 ) {
@@ -4160,7 +4593,9 @@ void gldlUniformMatrix2x4fv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix4x2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix4x2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix4x2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 464 );
     if( breakpoint >= 0 ) {
@@ -4171,7 +4606,9 @@ void gldlUniformMatrix4x2fv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix3x4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix3x4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix3x4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 460 );
     if( breakpoint >= 0 ) {
@@ -4182,7 +4619,9 @@ void gldlUniformMatrix3x4fv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix4x3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix4x3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix4x3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 466 );
     if( breakpoint >= 0 ) {
@@ -4193,7 +4632,9 @@ void gldlUniformMatrix4x3fv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlColorMaski ( GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboolean a, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glColorMaski( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glColorMaski( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 50 );
     if( breakpoint >= 0 ) {
@@ -4204,7 +4645,9 @@ void gldlColorMaski ( GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboo
 }
 
 void gldlGetBooleani_v ( GLenum target, GLuint index, GLboolean *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetBooleani_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetBooleani_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 159 );
     if( breakpoint >= 0 ) {
@@ -4215,7 +4658,9 @@ void gldlGetBooleani_v ( GLenum target, GLuint index, GLboolean *data, const cha
 }
 
 void gldlGetIntegeri_v ( GLenum target, GLuint index, GLint *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetIntegeri_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetIntegeri_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 178 );
     if( breakpoint >= 0 ) {
@@ -4226,7 +4671,9 @@ void gldlGetIntegeri_v ( GLenum target, GLuint index, GLint *data, const char *a
 }
 
 void gldlEnablei ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glEnablei( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glEnablei( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 121 );
     if( breakpoint >= 0 ) {
@@ -4237,7 +4684,9 @@ void gldlEnablei ( GLenum target, GLuint index, const char *arg0, const char *ar
 }
 
 void gldlDisablei ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDisablei( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDisablei( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 99 );
     if( breakpoint >= 0 ) {
@@ -4248,7 +4697,9 @@ void gldlDisablei ( GLenum target, GLuint index, const char *arg0, const char *a
 }
 
 GLboolean gldlIsEnabledi ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsEnabledi( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsEnabledi( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 255 );
     if( breakpoint >= 0 ) {
@@ -4259,7 +4710,9 @@ GLboolean gldlIsEnabledi ( GLenum target, GLuint index, const char *arg0, const 
 }
 
 void gldlBeginTransformFeedback ( GLenum primitiveMode, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBeginTransformFeedback( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBeginTransformFeedback( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 6 );
     if( breakpoint >= 0 ) {
@@ -4270,7 +4723,9 @@ void gldlBeginTransformFeedback ( GLenum primitiveMode, const char *arg0, const 
 }
 
 void gldlEndTransformFeedback ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glEndTransformFeedback();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glEndTransformFeedback();\n", file, line );
 
     int breakpoint = DebugTest( 125 );
     if( breakpoint >= 0 ) {
@@ -4281,7 +4736,9 @@ void gldlEndTransformFeedback ( const char *file, int line ) {
 }
 
 void gldlBindBufferRange ( GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindBufferRange( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindBufferRange( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 10 );
     if( breakpoint >= 0 ) {
@@ -4292,7 +4749,9 @@ void gldlBindBufferRange ( GLenum target, GLuint index, GLuint buffer, GLintptr 
 }
 
 void gldlBindBufferBase ( GLenum target, GLuint index, GLuint buffer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindBufferBase( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindBufferBase( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 9 );
     if( breakpoint >= 0 ) {
@@ -4303,7 +4762,9 @@ void gldlBindBufferBase ( GLenum target, GLuint index, GLuint buffer, const char
 }
 
 void gldlTransformFeedbackVaryings ( GLuint program, GLsizei count, const GLchar* *varyings, GLenum bufferMode, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTransformFeedbackVaryings( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTransformFeedbackVaryings( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 415 );
     if( breakpoint >= 0 ) {
@@ -4314,7 +4775,9 @@ void gldlTransformFeedbackVaryings ( GLuint program, GLsizei count, const GLchar
 }
 
 void gldlGetTransformFeedbackVarying ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetTransformFeedbackVarying( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetTransformFeedbackVarying( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 218 );
     if( breakpoint >= 0 ) {
@@ -4325,7 +4788,9 @@ void gldlGetTransformFeedbackVarying ( GLuint program, GLuint index, GLsizei buf
 }
 
 void gldlClampColor ( GLenum target, GLenum clamp, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClampColor( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClampColor( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 38 );
     if( breakpoint >= 0 ) {
@@ -4336,7 +4801,9 @@ void gldlClampColor ( GLenum target, GLenum clamp, const char *arg0, const char 
 }
 
 void gldlBeginConditionalRender ( GLuint id, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBeginConditionalRender( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBeginConditionalRender( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 3 );
     if( breakpoint >= 0 ) {
@@ -4347,7 +4814,9 @@ void gldlBeginConditionalRender ( GLuint id, GLenum mode, const char *arg0, cons
 }
 
 void gldlEndConditionalRender ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glEndConditionalRender();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glEndConditionalRender();\n", file, line );
 
     int breakpoint = DebugTest( 122 );
     if( breakpoint >= 0 ) {
@@ -4358,7 +4827,9 @@ void gldlEndConditionalRender ( const char *file, int line ) {
 }
 
 void gldlVertexAttribIPointer ( GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribIPointer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribIPointer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 530 );
     if( breakpoint >= 0 ) {
@@ -4369,7 +4840,9 @@ void gldlVertexAttribIPointer ( GLuint index, GLint size, GLenum type, GLsizei s
 }
 
 void gldlGetVertexAttribIiv ( GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetVertexAttribIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetVertexAttribIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 227 );
     if( breakpoint >= 0 ) {
@@ -4380,7 +4853,9 @@ void gldlGetVertexAttribIiv ( GLuint index, GLenum pname, GLint *params, const c
 }
 
 void gldlGetVertexAttribIuiv ( GLuint index, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetVertexAttribIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetVertexAttribIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 228 );
     if( breakpoint >= 0 ) {
@@ -4391,7 +4866,9 @@ void gldlGetVertexAttribIuiv ( GLuint index, GLenum pname, GLuint *params, const
 }
 
 void gldlVertexAttribI1i ( GLuint index, GLint x, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI1i( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI1i( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 510 );
     if( breakpoint >= 0 ) {
@@ -4402,7 +4879,9 @@ void gldlVertexAttribI1i ( GLuint index, GLint x, const char *arg0, const char *
 }
 
 void gldlVertexAttribI2i ( GLuint index, GLint x, GLint y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI2i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI2i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 514 );
     if( breakpoint >= 0 ) {
@@ -4413,7 +4892,9 @@ void gldlVertexAttribI2i ( GLuint index, GLint x, GLint y, const char *arg0, con
 }
 
 void gldlVertexAttribI3i ( GLuint index, GLint x, GLint y, GLint z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI3i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI3i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 518 );
     if( breakpoint >= 0 ) {
@@ -4424,7 +4905,9 @@ void gldlVertexAttribI3i ( GLuint index, GLint x, GLint y, GLint z, const char *
 }
 
 void gldlVertexAttribI4i ( GLuint index, GLint x, GLint y, GLint z, GLint w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI4i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI4i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 523 );
     if( breakpoint >= 0 ) {
@@ -4435,7 +4918,9 @@ void gldlVertexAttribI4i ( GLuint index, GLint x, GLint y, GLint z, GLint w, con
 }
 
 void gldlVertexAttribI1ui ( GLuint index, GLuint x, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI1ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI1ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 512 );
     if( breakpoint >= 0 ) {
@@ -4446,7 +4931,9 @@ void gldlVertexAttribI1ui ( GLuint index, GLuint x, const char *arg0, const char
 }
 
 void gldlVertexAttribI2ui ( GLuint index, GLuint x, GLuint y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 516 );
     if( breakpoint >= 0 ) {
@@ -4457,7 +4944,9 @@ void gldlVertexAttribI2ui ( GLuint index, GLuint x, GLuint y, const char *arg0, 
 }
 
 void gldlVertexAttribI3ui ( GLuint index, GLuint x, GLuint y, GLuint z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 520 );
     if( breakpoint >= 0 ) {
@@ -4468,7 +4957,9 @@ void gldlVertexAttribI3ui ( GLuint index, GLuint x, GLuint y, GLuint z, const ch
 }
 
 void gldlVertexAttribI4ui ( GLuint index, GLuint x, GLuint y, GLuint z, GLuint w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI4ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI4ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 527 );
     if( breakpoint >= 0 ) {
@@ -4479,7 +4970,9 @@ void gldlVertexAttribI4ui ( GLuint index, GLuint x, GLuint y, GLuint z, GLuint w
 }
 
 void gldlVertexAttribI1iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI1iv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI1iv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 511 );
     if( breakpoint >= 0 ) {
@@ -4490,7 +4983,9 @@ void gldlVertexAttribI1iv ( GLuint index, const GLint *v, const char *arg0, cons
 }
 
 void gldlVertexAttribI2iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI2iv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI2iv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 515 );
     if( breakpoint >= 0 ) {
@@ -4501,7 +4996,9 @@ void gldlVertexAttribI2iv ( GLuint index, const GLint *v, const char *arg0, cons
 }
 
 void gldlVertexAttribI3iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI3iv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI3iv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 519 );
     if( breakpoint >= 0 ) {
@@ -4512,7 +5009,9 @@ void gldlVertexAttribI3iv ( GLuint index, const GLint *v, const char *arg0, cons
 }
 
 void gldlVertexAttribI4iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI4iv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI4iv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 524 );
     if( breakpoint >= 0 ) {
@@ -4523,7 +5022,9 @@ void gldlVertexAttribI4iv ( GLuint index, const GLint *v, const char *arg0, cons
 }
 
 void gldlVertexAttribI1uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI1uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI1uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 513 );
     if( breakpoint >= 0 ) {
@@ -4534,7 +5035,9 @@ void gldlVertexAttribI1uiv ( GLuint index, const GLuint *v, const char *arg0, co
 }
 
 void gldlVertexAttribI2uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI2uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI2uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 517 );
     if( breakpoint >= 0 ) {
@@ -4545,7 +5048,9 @@ void gldlVertexAttribI2uiv ( GLuint index, const GLuint *v, const char *arg0, co
 }
 
 void gldlVertexAttribI3uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI3uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 521 );
     if( breakpoint >= 0 ) {
@@ -4556,7 +5061,9 @@ void gldlVertexAttribI3uiv ( GLuint index, const GLuint *v, const char *arg0, co
 }
 
 void gldlVertexAttribI4uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI4uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 528 );
     if( breakpoint >= 0 ) {
@@ -4567,7 +5074,9 @@ void gldlVertexAttribI4uiv ( GLuint index, const GLuint *v, const char *arg0, co
 }
 
 void gldlVertexAttribI4bv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI4bv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI4bv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 522 );
     if( breakpoint >= 0 ) {
@@ -4578,7 +5087,9 @@ void gldlVertexAttribI4bv ( GLuint index, const GLbyte *v, const char *arg0, con
 }
 
 void gldlVertexAttribI4sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI4sv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI4sv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 525 );
     if( breakpoint >= 0 ) {
@@ -4589,7 +5100,9 @@ void gldlVertexAttribI4sv ( GLuint index, const GLshort *v, const char *arg0, co
 }
 
 void gldlVertexAttribI4ubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI4ubv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI4ubv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 526 );
     if( breakpoint >= 0 ) {
@@ -4600,7 +5113,9 @@ void gldlVertexAttribI4ubv ( GLuint index, const GLubyte *v, const char *arg0, c
 }
 
 void gldlVertexAttribI4usv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribI4usv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribI4usv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 529 );
     if( breakpoint >= 0 ) {
@@ -4611,7 +5126,9 @@ void gldlVertexAttribI4usv ( GLuint index, const GLushort *v, const char *arg0, 
 }
 
 void gldlGetUniformuiv ( GLuint program, GLint location, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetUniformuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetUniformuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 226 );
     if( breakpoint >= 0 ) {
@@ -4622,7 +5139,9 @@ void gldlGetUniformuiv ( GLuint program, GLint location, GLuint *params, const c
 }
 
 void gldlBindFragDataLocation ( GLuint program, GLuint color, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindFragDataLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindFragDataLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 11 );
     if( breakpoint >= 0 ) {
@@ -4633,7 +5152,9 @@ void gldlBindFragDataLocation ( GLuint program, GLuint color, const GLchar *name
 }
 
 GLint gldlGetFragDataLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetFragDataLocation( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetFragDataLocation( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 173 );
     if( breakpoint >= 0 ) {
@@ -4644,7 +5165,9 @@ GLint gldlGetFragDataLocation ( GLuint program, const GLchar *name, const char *
 }
 
 void gldlUniform1ui ( GLint location, GLuint v0, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform1ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform1ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 422 );
     if( breakpoint >= 0 ) {
@@ -4655,7 +5178,9 @@ void gldlUniform1ui ( GLint location, GLuint v0, const char *arg0, const char *a
 }
 
 void gldlUniform2ui ( GLint location, GLuint v0, GLuint v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 430 );
     if( breakpoint >= 0 ) {
@@ -4666,7 +5191,9 @@ void gldlUniform2ui ( GLint location, GLuint v0, GLuint v1, const char *arg0, co
 }
 
 void gldlUniform3ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 438 );
     if( breakpoint >= 0 ) {
@@ -4677,7 +5204,9 @@ void gldlUniform3ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, const cha
 }
 
 void gldlUniform4ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform4ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform4ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 446 );
     if( breakpoint >= 0 ) {
@@ -4688,7 +5217,9 @@ void gldlUniform4ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3
 }
 
 void gldlUniform1uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform1uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform1uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 423 );
     if( breakpoint >= 0 ) {
@@ -4699,7 +5230,9 @@ void gldlUniform1uiv ( GLint location, GLsizei count, const GLuint *value, const
 }
 
 void gldlUniform2uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform2uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform2uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 431 );
     if( breakpoint >= 0 ) {
@@ -4710,7 +5243,9 @@ void gldlUniform2uiv ( GLint location, GLsizei count, const GLuint *value, const
 }
 
 void gldlUniform3uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform3uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform3uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 439 );
     if( breakpoint >= 0 ) {
@@ -4721,7 +5256,9 @@ void gldlUniform3uiv ( GLint location, GLsizei count, const GLuint *value, const
 }
 
 void gldlUniform4uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform4uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform4uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 447 );
     if( breakpoint >= 0 ) {
@@ -4732,7 +5269,9 @@ void gldlUniform4uiv ( GLint location, GLsizei count, const GLuint *value, const
 }
 
 void gldlTexParameterIiv ( GLenum target, GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 400 );
     if( breakpoint >= 0 ) {
@@ -4743,7 +5282,9 @@ void gldlTexParameterIiv ( GLenum target, GLenum pname, const GLint *params, con
 }
 
 void gldlTexParameterIuiv ( GLenum target, GLenum pname, const GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 401 );
     if( breakpoint >= 0 ) {
@@ -4754,7 +5295,9 @@ void gldlTexParameterIuiv ( GLenum target, GLenum pname, const GLuint *params, c
 }
 
 void gldlGetTexParameterIiv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetTexParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetTexParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 214 );
     if( breakpoint >= 0 ) {
@@ -4765,7 +5308,9 @@ void gldlGetTexParameterIiv ( GLenum target, GLenum pname, GLint *params, const 
 }
 
 void gldlGetTexParameterIuiv ( GLenum target, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetTexParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetTexParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 215 );
     if( breakpoint >= 0 ) {
@@ -4776,7 +5321,9 @@ void gldlGetTexParameterIuiv ( GLenum target, GLenum pname, GLuint *params, cons
 }
 
 void gldlClearBufferiv ( GLenum buffer, GLint drawbuffer, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClearBufferiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClearBufferiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 42 );
     if( breakpoint >= 0 ) {
@@ -4787,7 +5334,9 @@ void gldlClearBufferiv ( GLenum buffer, GLint drawbuffer, const GLint *value, co
 }
 
 void gldlClearBufferuiv ( GLenum buffer, GLint drawbuffer, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClearBufferuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClearBufferuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 43 );
     if( breakpoint >= 0 ) {
@@ -4798,7 +5347,9 @@ void gldlClearBufferuiv ( GLenum buffer, GLint drawbuffer, const GLuint *value, 
 }
 
 void gldlClearBufferfv ( GLenum buffer, GLint drawbuffer, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClearBufferfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClearBufferfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 41 );
     if( breakpoint >= 0 ) {
@@ -4809,7 +5360,9 @@ void gldlClearBufferfv ( GLenum buffer, GLint drawbuffer, const GLfloat *value, 
 }
 
 void gldlClearBufferfi ( GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClearBufferfi( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClearBufferfi( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 40 );
     if( breakpoint >= 0 ) {
@@ -4820,7 +5373,9 @@ void gldlClearBufferfi ( GLenum buffer, GLint drawbuffer, GLfloat depth, GLint s
 }
 
 const GLubyte * gldlGetStringi ( GLenum name, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetStringi( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetStringi( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 207 );
     if( breakpoint >= 0 ) {
@@ -4831,7 +5386,9 @@ const GLubyte * gldlGetStringi ( GLenum name, GLuint index, const char *arg0, co
 }
 
 void gldlDrawArraysInstanced ( GLenum mode, GLint first, GLsizei count, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawArraysInstanced( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawArraysInstanced( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 102 );
     if( breakpoint >= 0 ) {
@@ -4842,7 +5399,9 @@ void gldlDrawArraysInstanced ( GLenum mode, GLint first, GLsizei count, GLsizei 
 }
 
 void gldlDrawElementsInstanced ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawElementsInstanced( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawElementsInstanced( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 109 );
     if( breakpoint >= 0 ) {
@@ -4853,7 +5412,9 @@ void gldlDrawElementsInstanced ( GLenum mode, GLsizei count, GLenum type, const 
 }
 
 void gldlTexBuffer ( GLenum target, GLenum internalformat, GLuint buffer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexBuffer( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexBuffer( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 386 );
     if( breakpoint >= 0 ) {
@@ -4864,7 +5425,9 @@ void gldlTexBuffer ( GLenum target, GLenum internalformat, GLuint buffer, const 
 }
 
 void gldlPrimitiveRestartIndex ( GLuint index, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPrimitiveRestartIndex( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPrimitiveRestartIndex( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 302 );
     if( breakpoint >= 0 ) {
@@ -4875,7 +5438,9 @@ void gldlPrimitiveRestartIndex ( GLuint index, const char *arg0, const char *fil
 }
 
 void gldlGetInteger64i_v ( GLenum target, GLuint index, GLint64 *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetInteger64i_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetInteger64i_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 176 );
     if( breakpoint >= 0 ) {
@@ -4886,7 +5451,9 @@ void gldlGetInteger64i_v ( GLenum target, GLuint index, GLint64 *data, const cha
 }
 
 void gldlGetBufferParameteri64v ( GLenum target, GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetBufferParameteri64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetBufferParameteri64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 161 );
     if( breakpoint >= 0 ) {
@@ -4897,7 +5464,9 @@ void gldlGetBufferParameteri64v ( GLenum target, GLenum pname, GLint64 *params, 
 }
 
 void gldlFramebufferTexture ( GLenum target, GLenum attachment, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFramebufferTexture( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFramebufferTexture( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 131 );
     if( breakpoint >= 0 ) {
@@ -4908,7 +5477,9 @@ void gldlFramebufferTexture ( GLenum target, GLenum attachment, GLuint texture, 
 }
 
 void gldlVertexAttribDivisor ( GLuint index, GLuint divisor, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribDivisor( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribDivisor( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 509 );
     if( breakpoint >= 0 ) {
@@ -4919,7 +5490,9 @@ void gldlVertexAttribDivisor ( GLuint index, GLuint divisor, const char *arg0, c
 }
 
 void gldlMinSampleShading ( GLclampf value, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMinSampleShading( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMinSampleShading( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 274 );
     if( breakpoint >= 0 ) {
@@ -4930,7 +5503,9 @@ void gldlMinSampleShading ( GLclampf value, const char *arg0, const char *file, 
 }
 
 void gldlBlendEquationi ( GLuint buf, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendEquationi( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendEquationi( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 26 );
     if( breakpoint >= 0 ) {
@@ -4941,7 +5516,9 @@ void gldlBlendEquationi ( GLuint buf, GLenum mode, const char *arg0, const char 
 }
 
 void gldlBlendEquationSeparatei ( GLuint buf, GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendEquationSeparatei( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendEquationSeparatei( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 24 );
     if( breakpoint >= 0 ) {
@@ -4952,7 +5529,9 @@ void gldlBlendEquationSeparatei ( GLuint buf, GLenum modeRGB, GLenum modeAlpha, 
 }
 
 void gldlBlendFunci ( GLuint buf, GLenum src, GLenum dst, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendFunci( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendFunci( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 32 );
     if( breakpoint >= 0 ) {
@@ -4963,7 +5542,9 @@ void gldlBlendFunci ( GLuint buf, GLenum src, GLenum dst, const char *arg0, cons
 }
 
 void gldlBlendFuncSeparatei ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendFuncSeparatei( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendFuncSeparatei( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 30 );
     if( breakpoint >= 0 ) {
@@ -4974,7 +5555,9 @@ void gldlBlendFuncSeparatei ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum s
 }
 
 GLboolean gldlIsRenderbuffer ( GLuint renderbuffer, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsRenderbuffer( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsRenderbuffer( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 261 );
     if( breakpoint >= 0 ) {
@@ -4985,7 +5568,9 @@ GLboolean gldlIsRenderbuffer ( GLuint renderbuffer, const char *arg0, const char
 }
 
 void gldlBindRenderbuffer ( GLenum target, GLuint renderbuffer, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindRenderbuffer( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindRenderbuffer( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 16 );
     if( breakpoint >= 0 ) {
@@ -4996,7 +5581,9 @@ void gldlBindRenderbuffer ( GLenum target, GLuint renderbuffer, const char *arg0
 }
 
 void gldlDeleteRenderbuffers ( GLsizei n, const GLuint *renderbuffers, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteRenderbuffers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteRenderbuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 83 );
     if( breakpoint >= 0 ) {
@@ -5007,7 +5594,9 @@ void gldlDeleteRenderbuffers ( GLsizei n, const GLuint *renderbuffers, const cha
 }
 
 void gldlGenRenderbuffers ( GLsizei n, GLuint *renderbuffers, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenRenderbuffers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenRenderbuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 141 );
     if( breakpoint >= 0 ) {
@@ -5018,7 +5607,9 @@ void gldlGenRenderbuffers ( GLsizei n, GLuint *renderbuffers, const char *arg0, 
 }
 
 void gldlRenderbufferStorage ( GLenum target, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glRenderbufferStorage( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glRenderbufferStorage( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 361 );
     if( breakpoint >= 0 ) {
@@ -5029,7 +5620,9 @@ void gldlRenderbufferStorage ( GLenum target, GLenum internalformat, GLsizei wid
 }
 
 void gldlGetRenderbufferParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetRenderbufferParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetRenderbufferParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 197 );
     if( breakpoint >= 0 ) {
@@ -5040,7 +5633,9 @@ void gldlGetRenderbufferParameteriv ( GLenum target, GLenum pname, GLint *params
 }
 
 GLboolean gldlIsFramebuffer ( GLuint framebuffer, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsFramebuffer( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsFramebuffer( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 256 );
     if( breakpoint >= 0 ) {
@@ -5051,7 +5646,9 @@ GLboolean gldlIsFramebuffer ( GLuint framebuffer, const char *arg0, const char *
 }
 
 void gldlBindFramebuffer ( GLenum target, GLuint framebuffer, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindFramebuffer( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindFramebuffer( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 13 );
     if( breakpoint >= 0 ) {
@@ -5062,7 +5659,9 @@ void gldlBindFramebuffer ( GLenum target, GLuint framebuffer, const char *arg0, 
 }
 
 void gldlDeleteFramebuffers ( GLsizei n, const GLuint *framebuffers, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteFramebuffers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteFramebuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 78 );
     if( breakpoint >= 0 ) {
@@ -5073,7 +5672,9 @@ void gldlDeleteFramebuffers ( GLsizei n, const GLuint *framebuffers, const char 
 }
 
 void gldlGenFramebuffers ( GLsizei n, GLuint *framebuffers, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenFramebuffers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenFramebuffers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 138 );
     if( breakpoint >= 0 ) {
@@ -5084,7 +5685,9 @@ void gldlGenFramebuffers ( GLsizei n, GLuint *framebuffers, const char *arg0, co
 }
 
 GLenum gldlCheckFramebufferStatus ( GLenum target, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCheckFramebufferStatus( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCheckFramebufferStatus( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 37 );
     if( breakpoint >= 0 ) {
@@ -5095,7 +5698,9 @@ GLenum gldlCheckFramebufferStatus ( GLenum target, const char *arg0, const char 
 }
 
 void gldlFramebufferTexture1D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFramebufferTexture1D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFramebufferTexture1D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 132 );
     if( breakpoint >= 0 ) {
@@ -5106,7 +5711,9 @@ void gldlFramebufferTexture1D ( GLenum target, GLenum attachment, GLenum textarg
 }
 
 void gldlFramebufferTexture2D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFramebufferTexture2D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFramebufferTexture2D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 133 );
     if( breakpoint >= 0 ) {
@@ -5117,7 +5724,9 @@ void gldlFramebufferTexture2D ( GLenum target, GLenum attachment, GLenum textarg
 }
 
 void gldlFramebufferTexture3D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, GLint zoffset, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFramebufferTexture3D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFramebufferTexture3D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 134 );
     if( breakpoint >= 0 ) {
@@ -5128,7 +5737,9 @@ void gldlFramebufferTexture3D ( GLenum target, GLenum attachment, GLenum textarg
 }
 
 void gldlFramebufferRenderbuffer ( GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFramebufferRenderbuffer( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFramebufferRenderbuffer( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 130 );
     if( breakpoint >= 0 ) {
@@ -5139,7 +5750,9 @@ void gldlFramebufferRenderbuffer ( GLenum target, GLenum attachment, GLenum rend
 }
 
 void gldlGetFramebufferAttachmentParameteriv ( GLenum target, GLenum attachment, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetFramebufferAttachmentParameteriv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetFramebufferAttachmentParameteriv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 174 );
     if( breakpoint >= 0 ) {
@@ -5150,7 +5763,9 @@ void gldlGetFramebufferAttachmentParameteriv ( GLenum target, GLenum attachment,
 }
 
 void gldlGenerateMipmap ( GLenum target, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenerateMipmap( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenerateMipmap( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 146 );
     if( breakpoint >= 0 ) {
@@ -5161,7 +5776,9 @@ void gldlGenerateMipmap ( GLenum target, const char *arg0, const char *file, int
 }
 
 void gldlBlitFramebuffer ( GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlitFramebuffer( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,  arg9 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlitFramebuffer( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,  arg9 );
 
     int breakpoint = DebugTest( 34 );
     if( breakpoint >= 0 ) {
@@ -5172,7 +5789,9 @@ void gldlBlitFramebuffer ( GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, G
 }
 
 void gldlRenderbufferStorageMultisample ( GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glRenderbufferStorageMultisample( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glRenderbufferStorageMultisample( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 362 );
     if( breakpoint >= 0 ) {
@@ -5183,7 +5802,9 @@ void gldlRenderbufferStorageMultisample ( GLenum target, GLsizei samples, GLenum
 }
 
 void gldlFramebufferTextureLayer ( GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFramebufferTextureLayer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFramebufferTextureLayer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 135 );
     if( breakpoint >= 0 ) {
@@ -5194,7 +5815,9 @@ void gldlFramebufferTextureLayer ( GLenum target, GLenum attachment, GLuint text
 }
 
 GLvoid* gldlMapBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMapBufferRange( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMapBufferRange( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 272 );
     if( breakpoint >= 0 ) {
@@ -5205,7 +5828,9 @@ GLvoid* gldlMapBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, 
 }
 
 void gldlFlushMappedBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFlushMappedBufferRange( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFlushMappedBufferRange( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 129 );
     if( breakpoint >= 0 ) {
@@ -5216,7 +5841,9 @@ void gldlFlushMappedBufferRange ( GLenum target, GLintptr offset, GLsizeiptr len
 }
 
 void gldlBindVertexArray ( GLuint array, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindVertexArray( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindVertexArray( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 20 );
     if( breakpoint >= 0 ) {
@@ -5227,7 +5854,9 @@ void gldlBindVertexArray ( GLuint array, const char *arg0, const char *file, int
 }
 
 void gldlDeleteVertexArrays ( GLsizei n, const GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteVertexArrays( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteVertexArrays( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 89 );
     if( breakpoint >= 0 ) {
@@ -5238,7 +5867,9 @@ void gldlDeleteVertexArrays ( GLsizei n, const GLuint *arrays, const char *arg0,
 }
 
 void gldlGenVertexArrays ( GLsizei n, GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenVertexArrays( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenVertexArrays( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 145 );
     if( breakpoint >= 0 ) {
@@ -5249,7 +5880,9 @@ void gldlGenVertexArrays ( GLsizei n, GLuint *arrays, const char *arg0, const ch
 }
 
 GLboolean gldlIsVertexArray ( GLuint array, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsVertexArray( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsVertexArray( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 267 );
     if( breakpoint >= 0 ) {
@@ -5260,7 +5893,9 @@ GLboolean gldlIsVertexArray ( GLuint array, const char *arg0, const char *file, 
 }
 
 void gldlGetUniformIndices ( GLuint program, GLsizei uniformCount, const GLchar* *uniformNames, GLuint *uniformIndices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetUniformIndices( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetUniformIndices( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 220 );
     if( breakpoint >= 0 ) {
@@ -5271,7 +5906,9 @@ void gldlGetUniformIndices ( GLuint program, GLsizei uniformCount, const GLchar*
 }
 
 void gldlGetActiveUniformsiv ( GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveUniformsiv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveUniformsiv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 156 );
     if( breakpoint >= 0 ) {
@@ -5282,7 +5919,9 @@ void gldlGetActiveUniformsiv ( GLuint program, GLsizei uniformCount, const GLuin
 }
 
 void gldlGetActiveUniformName ( GLuint program, GLuint uniformIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformName, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveUniformName( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveUniformName( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 155 );
     if( breakpoint >= 0 ) {
@@ -5293,7 +5932,9 @@ void gldlGetActiveUniformName ( GLuint program, GLuint uniformIndex, GLsizei buf
 }
 
 GLuint gldlGetUniformBlockIndex ( GLuint program, const GLchar *uniformBlockName, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetUniformBlockIndex( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetUniformBlockIndex( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 219 );
     if( breakpoint >= 0 ) {
@@ -5304,7 +5945,9 @@ GLuint gldlGetUniformBlockIndex ( GLuint program, const GLchar *uniformBlockName
 }
 
 void gldlGetActiveUniformBlockiv ( GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveUniformBlockiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveUniformBlockiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 154 );
     if( breakpoint >= 0 ) {
@@ -5315,7 +5958,9 @@ void gldlGetActiveUniformBlockiv ( GLuint program, GLuint uniformBlockIndex, GLe
 }
 
 void gldlGetActiveUniformBlockName ( GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveUniformBlockName( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveUniformBlockName( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 153 );
     if( breakpoint >= 0 ) {
@@ -5326,7 +5971,9 @@ void gldlGetActiveUniformBlockName ( GLuint program, GLuint uniformBlockIndex, G
 }
 
 void gldlUniformBlockBinding ( GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformBlockBinding( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformBlockBinding( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 448 );
     if( breakpoint >= 0 ) {
@@ -5337,7 +5984,9 @@ void gldlUniformBlockBinding ( GLuint program, GLuint uniformBlockIndex, GLuint 
 }
 
 void gldlCopyBufferSubData ( GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCopyBufferSubData( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCopyBufferSubData( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 63 );
     if( breakpoint >= 0 ) {
@@ -5348,7 +5997,9 @@ void gldlCopyBufferSubData ( GLenum readTarget, GLenum writeTarget, GLintptr rea
 }
 
 void gldlDrawElementsBaseVertex ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawElementsBaseVertex( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawElementsBaseVertex( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 107 );
     if( breakpoint >= 0 ) {
@@ -5359,7 +6010,9 @@ void gldlDrawElementsBaseVertex ( GLenum mode, GLsizei count, GLenum type, const
 }
 
 void gldlDrawRangeElementsBaseVertex ( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawRangeElementsBaseVertex( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawRangeElementsBaseVertex( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 114 );
     if( breakpoint >= 0 ) {
@@ -5370,7 +6023,9 @@ void gldlDrawRangeElementsBaseVertex ( GLenum mode, GLuint start, GLuint end, GL
 }
 
 void gldlDrawElementsInstancedBaseVertex ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei primcount, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseVertex( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawElementsInstancedBaseVertex( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 111 );
     if( breakpoint >= 0 ) {
@@ -5381,7 +6036,9 @@ void gldlDrawElementsInstancedBaseVertex ( GLenum mode, GLsizei count, GLenum ty
 }
 
 void gldlMultiDrawElementsBaseVertex ( GLenum mode, const GLsizei *count, GLenum type, const GLvoid* *indices, GLsizei primcount, const GLint *basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiDrawElementsBaseVertex( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiDrawElementsBaseVertex( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 278 );
     if( breakpoint >= 0 ) {
@@ -5392,7 +6049,9 @@ void gldlMultiDrawElementsBaseVertex ( GLenum mode, const GLsizei *count, GLenum
 }
 
 void gldlProvokingVertex ( GLenum mode, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProvokingVertex( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProvokingVertex( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 355 );
     if( breakpoint >= 0 ) {
@@ -5403,7 +6062,9 @@ void gldlProvokingVertex ( GLenum mode, const char *arg0, const char *file, int 
 }
 
 GLsync gldlFenceSync ( GLenum condition, GLbitfield flags, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glFenceSync( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glFenceSync( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 126 );
     if( breakpoint >= 0 ) {
@@ -5414,7 +6075,9 @@ GLsync gldlFenceSync ( GLenum condition, GLbitfield flags, const char *arg0, con
 }
 
 GLboolean gldlIsSync ( GLsync sync, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsSync( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsSync( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 264 );
     if( breakpoint >= 0 ) {
@@ -5425,7 +6088,9 @@ GLboolean gldlIsSync ( GLsync sync, const char *arg0, const char *file, int line
 }
 
 void gldlDeleteSync ( GLsync sync, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteSync( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteSync( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 86 );
     if( breakpoint >= 0 ) {
@@ -5436,7 +6101,9 @@ void gldlDeleteSync ( GLsync sync, const char *arg0, const char *file, int line 
 }
 
 GLenum gldlClientWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClientWaitSync( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClientWaitSync( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 48 );
     if( breakpoint >= 0 ) {
@@ -5447,7 +6114,9 @@ GLenum gldlClientWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, con
 }
 
 void gldlWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glWaitSync( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glWaitSync( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 559 );
     if( breakpoint >= 0 ) {
@@ -5458,7 +6127,9 @@ void gldlWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char 
 }
 
 void gldlGetInteger64v ( GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetInteger64v( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetInteger64v( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 177 );
     if( breakpoint >= 0 ) {
@@ -5469,7 +6140,9 @@ void gldlGetInteger64v ( GLenum pname, GLint64 *params, const char *arg0, const 
 }
 
 void gldlGetSynciv ( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetSynciv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetSynciv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 210 );
     if( breakpoint >= 0 ) {
@@ -5480,7 +6153,9 @@ void gldlGetSynciv ( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length
 }
 
 void gldlTexImage2DMultisample ( GLenum target, GLsizei samples, GLint internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexImage2DMultisample( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexImage2DMultisample( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 397 );
     if( breakpoint >= 0 ) {
@@ -5491,7 +6166,9 @@ void gldlTexImage2DMultisample ( GLenum target, GLsizei samples, GLint internalf
 }
 
 void gldlTexImage3DMultisample ( GLenum target, GLsizei samples, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLboolean fixedsamplelocations, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexImage3DMultisample( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexImage3DMultisample( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 399 );
     if( breakpoint >= 0 ) {
@@ -5502,7 +6179,9 @@ void gldlTexImage3DMultisample ( GLenum target, GLsizei samples, GLint internalf
 }
 
 void gldlGetMultisamplefv ( GLenum pname, GLuint index, GLfloat *val, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetMultisamplefv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetMultisamplefv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 181 );
     if( breakpoint >= 0 ) {
@@ -5513,7 +6192,9 @@ void gldlGetMultisamplefv ( GLenum pname, GLuint index, GLfloat *val, const char
 }
 
 void gldlSampleMaski ( GLuint index, GLbitfield mask, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSampleMaski( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSampleMaski( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 365 );
     if( breakpoint >= 0 ) {
@@ -5524,7 +6205,9 @@ void gldlSampleMaski ( GLuint index, GLbitfield mask, const char *arg0, const ch
 }
 
 void gldlBlendEquationiARB ( GLuint buf, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendEquationiARB( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendEquationiARB( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 27 );
     if( breakpoint >= 0 ) {
@@ -5535,7 +6218,9 @@ void gldlBlendEquationiARB ( GLuint buf, GLenum mode, const char *arg0, const ch
 }
 
 void gldlBlendEquationSeparateiARB ( GLuint buf, GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendEquationSeparateiARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendEquationSeparateiARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 25 );
     if( breakpoint >= 0 ) {
@@ -5546,7 +6231,9 @@ void gldlBlendEquationSeparateiARB ( GLuint buf, GLenum modeRGB, GLenum modeAlph
 }
 
 void gldlBlendFunciARB ( GLuint buf, GLenum src, GLenum dst, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendFunciARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendFunciARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 33 );
     if( breakpoint >= 0 ) {
@@ -5557,7 +6244,9 @@ void gldlBlendFunciARB ( GLuint buf, GLenum src, GLenum dst, const char *arg0, c
 }
 
 void gldlBlendFuncSeparateiARB ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBlendFuncSeparateiARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBlendFuncSeparateiARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 31 );
     if( breakpoint >= 0 ) {
@@ -5568,7 +6257,9 @@ void gldlBlendFuncSeparateiARB ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenu
 }
 
 void gldlMinSampleShadingARB ( GLclampf value, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMinSampleShadingARB( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMinSampleShadingARB( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 275 );
     if( breakpoint >= 0 ) {
@@ -5579,7 +6270,9 @@ void gldlMinSampleShadingARB ( GLclampf value, const char *arg0, const char *fil
 }
 
 void gldlNamedStringARB ( GLenum type, GLint namelen, const GLchar *name, GLint stringlen, const GLchar *string, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glNamedStringARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glNamedStringARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 287 );
     if( breakpoint >= 0 ) {
@@ -5590,7 +6283,9 @@ void gldlNamedStringARB ( GLenum type, GLint namelen, const GLchar *name, GLint 
 }
 
 void gldlDeleteNamedStringARB ( GLint namelen, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteNamedStringARB( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteNamedStringARB( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 79 );
     if( breakpoint >= 0 ) {
@@ -5601,7 +6296,9 @@ void gldlDeleteNamedStringARB ( GLint namelen, const GLchar *name, const char *a
 }
 
 void gldlCompileShaderIncludeARB ( GLuint shader, GLsizei count, const GLchar* *path, const GLint *length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCompileShaderIncludeARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCompileShaderIncludeARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 56 );
     if( breakpoint >= 0 ) {
@@ -5612,7 +6309,9 @@ void gldlCompileShaderIncludeARB ( GLuint shader, GLsizei count, const GLchar* *
 }
 
 GLboolean gldlIsNamedStringARB ( GLint namelen, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsNamedStringARB( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsNamedStringARB( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 257 );
     if( breakpoint >= 0 ) {
@@ -5623,7 +6322,9 @@ GLboolean gldlIsNamedStringARB ( GLint namelen, const GLchar *name, const char *
 }
 
 void gldlGetNamedStringARB ( GLint namelen, const GLchar *name, GLsizei bufSize, GLint *stringlen, GLchar *string, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetNamedStringARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetNamedStringARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 182 );
     if( breakpoint >= 0 ) {
@@ -5634,7 +6335,9 @@ void gldlGetNamedStringARB ( GLint namelen, const GLchar *name, GLsizei bufSize,
 }
 
 void gldlGetNamedStringivARB ( GLint namelen, const GLchar *name, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetNamedStringivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetNamedStringivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 183 );
     if( breakpoint >= 0 ) {
@@ -5645,7 +6348,9 @@ void gldlGetNamedStringivARB ( GLint namelen, const GLchar *name, GLenum pname, 
 }
 
 void gldlBindFragDataLocationIndexed ( GLuint program, GLuint colorNumber, GLuint index, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindFragDataLocationIndexed( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindFragDataLocationIndexed( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 12 );
     if( breakpoint >= 0 ) {
@@ -5656,7 +6361,9 @@ void gldlBindFragDataLocationIndexed ( GLuint program, GLuint colorNumber, GLuin
 }
 
 GLint gldlGetFragDataIndex ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetFragDataIndex( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetFragDataIndex( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 172 );
     if( breakpoint >= 0 ) {
@@ -5667,7 +6374,9 @@ GLint gldlGetFragDataIndex ( GLuint program, const GLchar *name, const char *arg
 }
 
 void gldlGenSamplers ( GLsizei count, GLuint *samplers, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenSamplers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenSamplers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 142 );
     if( breakpoint >= 0 ) {
@@ -5678,7 +6387,9 @@ void gldlGenSamplers ( GLsizei count, GLuint *samplers, const char *arg0, const 
 }
 
 void gldlDeleteSamplers ( GLsizei count, const GLuint *samplers, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteSamplers( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteSamplers( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 84 );
     if( breakpoint >= 0 ) {
@@ -5689,7 +6400,9 @@ void gldlDeleteSamplers ( GLsizei count, const GLuint *samplers, const char *arg
 }
 
 GLboolean gldlIsSampler ( GLuint sampler, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsSampler( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsSampler( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 262 );
     if( breakpoint >= 0 ) {
@@ -5700,7 +6413,9 @@ GLboolean gldlIsSampler ( GLuint sampler, const char *arg0, const char *file, in
 }
 
 void gldlBindSampler ( GLuint unit, GLuint sampler, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindSampler( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindSampler( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 17 );
     if( breakpoint >= 0 ) {
@@ -5711,7 +6426,9 @@ void gldlBindSampler ( GLuint unit, GLuint sampler, const char *arg0, const char
 }
 
 void gldlSamplerParameteri ( GLuint sampler, GLenum pname, GLint param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSamplerParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSamplerParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 370 );
     if( breakpoint >= 0 ) {
@@ -5722,7 +6439,9 @@ void gldlSamplerParameteri ( GLuint sampler, GLenum pname, GLint param, const ch
 }
 
 void gldlSamplerParameteriv ( GLuint sampler, GLenum pname, const GLint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSamplerParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSamplerParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 371 );
     if( breakpoint >= 0 ) {
@@ -5733,7 +6452,9 @@ void gldlSamplerParameteriv ( GLuint sampler, GLenum pname, const GLint *param, 
 }
 
 void gldlSamplerParameterf ( GLuint sampler, GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSamplerParameterf( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSamplerParameterf( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 368 );
     if( breakpoint >= 0 ) {
@@ -5744,7 +6465,9 @@ void gldlSamplerParameterf ( GLuint sampler, GLenum pname, GLfloat param, const 
 }
 
 void gldlSamplerParameterfv ( GLuint sampler, GLenum pname, const GLfloat *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSamplerParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSamplerParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 369 );
     if( breakpoint >= 0 ) {
@@ -5755,7 +6478,9 @@ void gldlSamplerParameterfv ( GLuint sampler, GLenum pname, const GLfloat *param
 }
 
 void gldlSamplerParameterIiv ( GLuint sampler, GLenum pname, const GLint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSamplerParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSamplerParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 366 );
     if( breakpoint >= 0 ) {
@@ -5766,7 +6491,9 @@ void gldlSamplerParameterIiv ( GLuint sampler, GLenum pname, const GLint *param,
 }
 
 void gldlSamplerParameterIuiv ( GLuint sampler, GLenum pname, const GLuint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSamplerParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSamplerParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 367 );
     if( breakpoint >= 0 ) {
@@ -5777,7 +6504,9 @@ void gldlSamplerParameterIuiv ( GLuint sampler, GLenum pname, const GLuint *para
 }
 
 void gldlGetSamplerParameteriv ( GLuint sampler, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetSamplerParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetSamplerParameteriv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 201 );
     if( breakpoint >= 0 ) {
@@ -5788,7 +6517,9 @@ void gldlGetSamplerParameteriv ( GLuint sampler, GLenum pname, GLint *params, co
 }
 
 void gldlGetSamplerParameterIiv ( GLuint sampler, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetSamplerParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetSamplerParameterIiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 198 );
     if( breakpoint >= 0 ) {
@@ -5799,7 +6530,9 @@ void gldlGetSamplerParameterIiv ( GLuint sampler, GLenum pname, GLint *params, c
 }
 
 void gldlGetSamplerParameterfv ( GLuint sampler, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetSamplerParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetSamplerParameterfv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 200 );
     if( breakpoint >= 0 ) {
@@ -5810,7 +6543,9 @@ void gldlGetSamplerParameterfv ( GLuint sampler, GLenum pname, GLfloat *params, 
 }
 
 void gldlGetSamplerParameterIuiv ( GLuint sampler, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetSamplerParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetSamplerParameterIuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 199 );
     if( breakpoint >= 0 ) {
@@ -5821,7 +6556,9 @@ void gldlGetSamplerParameterIuiv ( GLuint sampler, GLenum pname, GLuint *params,
 }
 
 void gldlQueryCounter ( GLuint id, GLenum target, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glQueryCounter( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glQueryCounter( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 356 );
     if( breakpoint >= 0 ) {
@@ -5832,7 +6569,9 @@ void gldlQueryCounter ( GLuint id, GLenum target, const char *arg0, const char *
 }
 
 void gldlGetQueryObjecti64v ( GLuint id, GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetQueryObjecti64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetQueryObjecti64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 192 );
     if( breakpoint >= 0 ) {
@@ -5843,7 +6582,9 @@ void gldlGetQueryObjecti64v ( GLuint id, GLenum pname, GLint64 *params, const ch
 }
 
 void gldlGetQueryObjectui64v ( GLuint id, GLenum pname, GLuint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetQueryObjectui64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetQueryObjectui64v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 194 );
     if( breakpoint >= 0 ) {
@@ -5854,7 +6595,9 @@ void gldlGetQueryObjectui64v ( GLuint id, GLenum pname, GLuint64 *params, const 
 }
 
 void gldlVertexP2ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexP2ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexP2ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 549 );
     if( breakpoint >= 0 ) {
@@ -5865,7 +6608,9 @@ void gldlVertexP2ui ( GLenum type, GLuint value, const char *arg0, const char *a
 }
 
 void gldlVertexP2uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexP2uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexP2uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 550 );
     if( breakpoint >= 0 ) {
@@ -5876,7 +6621,9 @@ void gldlVertexP2uiv ( GLenum type, const GLuint *value, const char *arg0, const
 }
 
 void gldlVertexP3ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexP3ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 551 );
     if( breakpoint >= 0 ) {
@@ -5887,7 +6634,9 @@ void gldlVertexP3ui ( GLenum type, GLuint value, const char *arg0, const char *a
 }
 
 void gldlVertexP3uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 552 );
     if( breakpoint >= 0 ) {
@@ -5898,7 +6647,9 @@ void gldlVertexP3uiv ( GLenum type, const GLuint *value, const char *arg0, const
 }
 
 void gldlVertexP4ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexP4ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexP4ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 553 );
     if( breakpoint >= 0 ) {
@@ -5909,7 +6660,9 @@ void gldlVertexP4ui ( GLenum type, GLuint value, const char *arg0, const char *a
 }
 
 void gldlVertexP4uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 554 );
     if( breakpoint >= 0 ) {
@@ -5920,7 +6673,9 @@ void gldlVertexP4uiv ( GLenum type, const GLuint *value, const char *arg0, const
 }
 
 void gldlTexCoordP1ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexCoordP1ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexCoordP1ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 387 );
     if( breakpoint >= 0 ) {
@@ -5931,7 +6686,9 @@ void gldlTexCoordP1ui ( GLenum type, GLuint coords, const char *arg0, const char
 }
 
 void gldlTexCoordP1uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexCoordP1uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexCoordP1uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 388 );
     if( breakpoint >= 0 ) {
@@ -5942,7 +6699,9 @@ void gldlTexCoordP1uiv ( GLenum type, const GLuint *coords, const char *arg0, co
 }
 
 void gldlTexCoordP2ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexCoordP2ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexCoordP2ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 389 );
     if( breakpoint >= 0 ) {
@@ -5953,7 +6712,9 @@ void gldlTexCoordP2ui ( GLenum type, GLuint coords, const char *arg0, const char
 }
 
 void gldlTexCoordP2uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexCoordP2uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexCoordP2uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 390 );
     if( breakpoint >= 0 ) {
@@ -5964,7 +6725,9 @@ void gldlTexCoordP2uiv ( GLenum type, const GLuint *coords, const char *arg0, co
 }
 
 void gldlTexCoordP3ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexCoordP3ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexCoordP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 391 );
     if( breakpoint >= 0 ) {
@@ -5975,7 +6738,9 @@ void gldlTexCoordP3ui ( GLenum type, GLuint coords, const char *arg0, const char
 }
 
 void gldlTexCoordP3uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexCoordP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexCoordP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 392 );
     if( breakpoint >= 0 ) {
@@ -5986,7 +6751,9 @@ void gldlTexCoordP3uiv ( GLenum type, const GLuint *coords, const char *arg0, co
 }
 
 void gldlTexCoordP4ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexCoordP4ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexCoordP4ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 393 );
     if( breakpoint >= 0 ) {
@@ -5997,7 +6764,9 @@ void gldlTexCoordP4ui ( GLenum type, GLuint coords, const char *arg0, const char
 }
 
 void gldlTexCoordP4uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexCoordP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexCoordP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 394 );
     if( breakpoint >= 0 ) {
@@ -6008,7 +6777,9 @@ void gldlTexCoordP4uiv ( GLenum type, const GLuint *coords, const char *arg0, co
 }
 
 void gldlMultiTexCoordP1ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiTexCoordP1ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiTexCoordP1ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 279 );
     if( breakpoint >= 0 ) {
@@ -6019,7 +6790,9 @@ void gldlMultiTexCoordP1ui ( GLenum texture, GLenum type, GLuint coords, const c
 }
 
 void gldlMultiTexCoordP1uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiTexCoordP1uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiTexCoordP1uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 280 );
     if( breakpoint >= 0 ) {
@@ -6030,7 +6803,9 @@ void gldlMultiTexCoordP1uiv ( GLenum texture, GLenum type, const GLuint *coords,
 }
 
 void gldlMultiTexCoordP2ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiTexCoordP2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiTexCoordP2ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 281 );
     if( breakpoint >= 0 ) {
@@ -6041,7 +6816,9 @@ void gldlMultiTexCoordP2ui ( GLenum texture, GLenum type, GLuint coords, const c
 }
 
 void gldlMultiTexCoordP2uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiTexCoordP2uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiTexCoordP2uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 282 );
     if( breakpoint >= 0 ) {
@@ -6052,7 +6829,9 @@ void gldlMultiTexCoordP2uiv ( GLenum texture, GLenum type, const GLuint *coords,
 }
 
 void gldlMultiTexCoordP3ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiTexCoordP3ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiTexCoordP3ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 283 );
     if( breakpoint >= 0 ) {
@@ -6063,7 +6842,9 @@ void gldlMultiTexCoordP3ui ( GLenum texture, GLenum type, GLuint coords, const c
 }
 
 void gldlMultiTexCoordP3uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiTexCoordP3uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiTexCoordP3uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 284 );
     if( breakpoint >= 0 ) {
@@ -6074,7 +6855,9 @@ void gldlMultiTexCoordP3uiv ( GLenum texture, GLenum type, const GLuint *coords,
 }
 
 void gldlMultiTexCoordP4ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiTexCoordP4ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiTexCoordP4ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 285 );
     if( breakpoint >= 0 ) {
@@ -6085,7 +6868,9 @@ void gldlMultiTexCoordP4ui ( GLenum texture, GLenum type, GLuint coords, const c
 }
 
 void gldlMultiTexCoordP4uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMultiTexCoordP4uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMultiTexCoordP4uiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 286 );
     if( breakpoint >= 0 ) {
@@ -6096,7 +6881,9 @@ void gldlMultiTexCoordP4uiv ( GLenum texture, GLenum type, const GLuint *coords,
 }
 
 void gldlNormalP3ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glNormalP3ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glNormalP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 288 );
     if( breakpoint >= 0 ) {
@@ -6107,7 +6894,9 @@ void gldlNormalP3ui ( GLenum type, GLuint coords, const char *arg0, const char *
 }
 
 void gldlNormalP3uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glNormalP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glNormalP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 289 );
     if( breakpoint >= 0 ) {
@@ -6118,7 +6907,9 @@ void gldlNormalP3uiv ( GLenum type, const GLuint *coords, const char *arg0, cons
 }
 
 void gldlColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glColorP3ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glColorP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 51 );
     if( breakpoint >= 0 ) {
@@ -6129,7 +6920,9 @@ void gldlColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *ar
 }
 
 void gldlColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glColorP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glColorP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 52 );
     if( breakpoint >= 0 ) {
@@ -6140,7 +6933,9 @@ void gldlColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const 
 }
 
 void gldlColorP4ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glColorP4ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glColorP4ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 53 );
     if( breakpoint >= 0 ) {
@@ -6151,7 +6946,9 @@ void gldlColorP4ui ( GLenum type, GLuint color, const char *arg0, const char *ar
 }
 
 void gldlColorP4uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glColorP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glColorP4uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 54 );
     if( breakpoint >= 0 ) {
@@ -6162,7 +6959,9 @@ void gldlColorP4uiv ( GLenum type, const GLuint *color, const char *arg0, const 
 }
 
 void gldlSecondaryColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSecondaryColorP3ui( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSecondaryColorP3ui( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 376 );
     if( breakpoint >= 0 ) {
@@ -6173,7 +6972,9 @@ void gldlSecondaryColorP3ui ( GLenum type, GLuint color, const char *arg0, const
 }
 
 void gldlSecondaryColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glSecondaryColorP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glSecondaryColorP3uiv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 377 );
     if( breakpoint >= 0 ) {
@@ -6184,7 +6985,9 @@ void gldlSecondaryColorP3uiv ( GLenum type, const GLuint *color, const char *arg
 }
 
 void gldlVertexAttribP1ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribP1ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribP1ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 540 );
     if( breakpoint >= 0 ) {
@@ -6195,7 +6998,9 @@ void gldlVertexAttribP1ui ( GLuint index, GLenum type, GLboolean normalized, GLu
 }
 
 void gldlVertexAttribP1uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribP1uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribP1uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 541 );
     if( breakpoint >= 0 ) {
@@ -6206,7 +7011,9 @@ void gldlVertexAttribP1uiv ( GLuint index, GLenum type, GLboolean normalized, co
 }
 
 void gldlVertexAttribP2ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribP2ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribP2ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 542 );
     if( breakpoint >= 0 ) {
@@ -6217,7 +7024,9 @@ void gldlVertexAttribP2ui ( GLuint index, GLenum type, GLboolean normalized, GLu
 }
 
 void gldlVertexAttribP2uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribP2uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribP2uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 543 );
     if( breakpoint >= 0 ) {
@@ -6228,7 +7037,9 @@ void gldlVertexAttribP2uiv ( GLuint index, GLenum type, GLboolean normalized, co
 }
 
 void gldlVertexAttribP3ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribP3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribP3ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 544 );
     if( breakpoint >= 0 ) {
@@ -6239,7 +7050,9 @@ void gldlVertexAttribP3ui ( GLuint index, GLenum type, GLboolean normalized, GLu
 }
 
 void gldlVertexAttribP3uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribP3uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribP3uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 545 );
     if( breakpoint >= 0 ) {
@@ -6250,7 +7063,9 @@ void gldlVertexAttribP3uiv ( GLuint index, GLenum type, GLboolean normalized, co
 }
 
 void gldlVertexAttribP4ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribP4ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribP4ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 546 );
     if( breakpoint >= 0 ) {
@@ -6261,7 +7076,9 @@ void gldlVertexAttribP4ui ( GLuint index, GLenum type, GLboolean normalized, GLu
 }
 
 void gldlVertexAttribP4uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribP4uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribP4uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 547 );
     if( breakpoint >= 0 ) {
@@ -6272,7 +7089,9 @@ void gldlVertexAttribP4uiv ( GLuint index, GLenum type, GLboolean normalized, co
 }
 
 void gldlDrawArraysIndirect ( GLenum mode, const GLvoid *indirect, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawArraysIndirect( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawArraysIndirect( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 101 );
     if( breakpoint >= 0 ) {
@@ -6283,7 +7102,9 @@ void gldlDrawArraysIndirect ( GLenum mode, const GLvoid *indirect, const char *a
 }
 
 void gldlDrawElementsIndirect ( GLenum mode, GLenum type, const GLvoid *indirect, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawElementsIndirect( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawElementsIndirect( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 108 );
     if( breakpoint >= 0 ) {
@@ -6294,7 +7115,9 @@ void gldlDrawElementsIndirect ( GLenum mode, GLenum type, const GLvoid *indirect
 }
 
 void gldlUniform1d ( GLint location, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform1d( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform1d( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 416 );
     if( breakpoint >= 0 ) {
@@ -6305,7 +7128,9 @@ void gldlUniform1d ( GLint location, GLdouble x, const char *arg0, const char *a
 }
 
 void gldlUniform2d ( GLint location, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 424 );
     if( breakpoint >= 0 ) {
@@ -6316,7 +7141,9 @@ void gldlUniform2d ( GLint location, GLdouble x, GLdouble y, const char *arg0, c
 }
 
 void gldlUniform3d ( GLint location, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 432 );
     if( breakpoint >= 0 ) {
@@ -6327,7 +7154,9 @@ void gldlUniform3d ( GLint location, GLdouble x, GLdouble y, GLdouble z, const c
 }
 
 void gldlUniform4d ( GLint location, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 440 );
     if( breakpoint >= 0 ) {
@@ -6338,7 +7167,9 @@ void gldlUniform4d ( GLint location, GLdouble x, GLdouble y, GLdouble z, GLdoubl
 }
 
 void gldlUniform1dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform1dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform1dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 417 );
     if( breakpoint >= 0 ) {
@@ -6349,7 +7180,9 @@ void gldlUniform1dv ( GLint location, GLsizei count, const GLdouble *value, cons
 }
 
 void gldlUniform2dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform2dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform2dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 425 );
     if( breakpoint >= 0 ) {
@@ -6360,7 +7193,9 @@ void gldlUniform2dv ( GLint location, GLsizei count, const GLdouble *value, cons
 }
 
 void gldlUniform3dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform3dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform3dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 433 );
     if( breakpoint >= 0 ) {
@@ -6371,7 +7206,9 @@ void gldlUniform3dv ( GLint location, GLsizei count, const GLdouble *value, cons
 }
 
 void gldlUniform4dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniform4dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniform4dv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 441 );
     if( breakpoint >= 0 ) {
@@ -6382,7 +7219,9 @@ void gldlUniform4dv ( GLint location, GLsizei count, const GLdouble *value, cons
 }
 
 void gldlUniformMatrix2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 449 );
     if( breakpoint >= 0 ) {
@@ -6393,7 +7232,9 @@ void gldlUniformMatrix2dv ( GLint location, GLsizei count, GLboolean transpose, 
 }
 
 void gldlUniformMatrix3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 455 );
     if( breakpoint >= 0 ) {
@@ -6404,7 +7245,9 @@ void gldlUniformMatrix3dv ( GLint location, GLsizei count, GLboolean transpose, 
 }
 
 void gldlUniformMatrix4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 461 );
     if( breakpoint >= 0 ) {
@@ -6415,7 +7258,9 @@ void gldlUniformMatrix4dv ( GLint location, GLsizei count, GLboolean transpose, 
 }
 
 void gldlUniformMatrix2x3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix2x3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix2x3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 451 );
     if( breakpoint >= 0 ) {
@@ -6426,7 +7271,9 @@ void gldlUniformMatrix2x3dv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix2x4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix2x4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix2x4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 453 );
     if( breakpoint >= 0 ) {
@@ -6437,7 +7284,9 @@ void gldlUniformMatrix2x4dv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix3x2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix3x2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix3x2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 457 );
     if( breakpoint >= 0 ) {
@@ -6448,7 +7297,9 @@ void gldlUniformMatrix3x2dv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix3x4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix3x4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix3x4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 459 );
     if( breakpoint >= 0 ) {
@@ -6459,7 +7310,9 @@ void gldlUniformMatrix3x4dv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix4x2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix4x2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix4x2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 463 );
     if( breakpoint >= 0 ) {
@@ -6470,7 +7323,9 @@ void gldlUniformMatrix4x2dv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlUniformMatrix4x3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformMatrix4x3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformMatrix4x3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 465 );
     if( breakpoint >= 0 ) {
@@ -6481,7 +7336,9 @@ void gldlUniformMatrix4x3dv ( GLint location, GLsizei count, GLboolean transpose
 }
 
 void gldlGetUniformdv ( GLuint program, GLint location, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetUniformdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetUniformdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 223 );
     if( breakpoint >= 0 ) {
@@ -6492,7 +7349,9 @@ void gldlGetUniformdv ( GLuint program, GLint location, GLdouble *params, const 
 }
 
 GLint gldlGetSubroutineUniformLocation ( GLuint program, GLenum shadertype, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetSubroutineUniformLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetSubroutineUniformLocation( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 209 );
     if( breakpoint >= 0 ) {
@@ -6503,7 +7362,9 @@ GLint gldlGetSubroutineUniformLocation ( GLuint program, GLenum shadertype, cons
 }
 
 GLuint gldlGetSubroutineIndex ( GLuint program, GLenum shadertype, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetSubroutineIndex( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetSubroutineIndex( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 208 );
     if( breakpoint >= 0 ) {
@@ -6514,7 +7375,9 @@ GLuint gldlGetSubroutineIndex ( GLuint program, GLenum shadertype, const GLchar 
 }
 
 void gldlGetActiveSubroutineUniformiv ( GLuint program, GLenum shadertype, GLuint index, GLenum pname, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineUniformiv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveSubroutineUniformiv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 151 );
     if( breakpoint >= 0 ) {
@@ -6525,7 +7388,9 @@ void gldlGetActiveSubroutineUniformiv ( GLuint program, GLenum shadertype, GLuin
 }
 
 void gldlGetActiveSubroutineUniformName ( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineUniformName( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveSubroutineUniformName( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 150 );
     if( breakpoint >= 0 ) {
@@ -6536,7 +7401,9 @@ void gldlGetActiveSubroutineUniformName ( GLuint program, GLenum shadertype, GLu
 }
 
 void gldlGetActiveSubroutineName ( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveSubroutineName( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveSubroutineName( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 149 );
     if( breakpoint >= 0 ) {
@@ -6547,7 +7414,9 @@ void gldlGetActiveSubroutineName ( GLuint program, GLenum shadertype, GLuint ind
 }
 
 void gldlUniformSubroutinesuiv ( GLenum shadertype, GLsizei count, const GLuint *indices, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUniformSubroutinesuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUniformSubroutinesuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 467 );
     if( breakpoint >= 0 ) {
@@ -6558,7 +7427,9 @@ void gldlUniformSubroutinesuiv ( GLenum shadertype, GLsizei count, const GLuint 
 }
 
 void gldlGetUniformSubroutineuiv ( GLenum shadertype, GLint location, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetUniformSubroutineuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetUniformSubroutineuiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 222 );
     if( breakpoint >= 0 ) {
@@ -6569,7 +7440,9 @@ void gldlGetUniformSubroutineuiv ( GLenum shadertype, GLint location, GLuint *pa
 }
 
 void gldlGetProgramStageiv ( GLuint program, GLenum shadertype, GLenum pname, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetProgramStageiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetProgramStageiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 189 );
     if( breakpoint >= 0 ) {
@@ -6580,7 +7453,9 @@ void gldlGetProgramStageiv ( GLuint program, GLenum shadertype, GLenum pname, GL
 }
 
 void gldlPatchParameteri ( GLenum pname, GLint value, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPatchParameteri( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPatchParameteri( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 291 );
     if( breakpoint >= 0 ) {
@@ -6591,7 +7466,9 @@ void gldlPatchParameteri ( GLenum pname, GLint value, const char *arg0, const ch
 }
 
 void gldlPatchParameterfv ( GLenum pname, const GLfloat *values, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPatchParameterfv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPatchParameterfv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 290 );
     if( breakpoint >= 0 ) {
@@ -6602,7 +7479,9 @@ void gldlPatchParameterfv ( GLenum pname, const GLfloat *values, const char *arg
 }
 
 void gldlBindTransformFeedback ( GLenum target, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindTransformFeedback( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindTransformFeedback( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 19 );
     if( breakpoint >= 0 ) {
@@ -6613,7 +7492,9 @@ void gldlBindTransformFeedback ( GLenum target, GLuint id, const char *arg0, con
 }
 
 void gldlDeleteTransformFeedbacks ( GLsizei n, const GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteTransformFeedbacks( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteTransformFeedbacks( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 88 );
     if( breakpoint >= 0 ) {
@@ -6624,7 +7505,9 @@ void gldlDeleteTransformFeedbacks ( GLsizei n, const GLuint *ids, const char *ar
 }
 
 void gldlGenTransformFeedbacks ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenTransformFeedbacks( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenTransformFeedbacks( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 144 );
     if( breakpoint >= 0 ) {
@@ -6635,7 +7518,9 @@ void gldlGenTransformFeedbacks ( GLsizei n, GLuint *ids, const char *arg0, const
 }
 
 GLboolean gldlIsTransformFeedback ( GLuint id, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsTransformFeedback( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsTransformFeedback( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 266 );
     if( breakpoint >= 0 ) {
@@ -6646,7 +7531,9 @@ GLboolean gldlIsTransformFeedback ( GLuint id, const char *arg0, const char *fil
 }
 
 void gldlPauseTransformFeedback ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glPauseTransformFeedback();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glPauseTransformFeedback();\n", file, line );
 
     int breakpoint = DebugTest( 292 );
     if( breakpoint >= 0 ) {
@@ -6657,7 +7544,9 @@ void gldlPauseTransformFeedback ( const char *file, int line ) {
 }
 
 void gldlResumeTransformFeedback ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glResumeTransformFeedback();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glResumeTransformFeedback();\n", file, line );
 
     int breakpoint = DebugTest( 363 );
     if( breakpoint >= 0 ) {
@@ -6668,7 +7557,9 @@ void gldlResumeTransformFeedback ( const char *file, int line ) {
 }
 
 void gldlDrawTransformFeedback ( GLenum mode, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawTransformFeedback( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawTransformFeedback( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 115 );
     if( breakpoint >= 0 ) {
@@ -6679,7 +7570,9 @@ void gldlDrawTransformFeedback ( GLenum mode, GLuint id, const char *arg0, const
 }
 
 void gldlDrawTransformFeedbackStream ( GLenum mode, GLuint id, GLuint stream, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawTransformFeedbackStream( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawTransformFeedbackStream( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 117 );
     if( breakpoint >= 0 ) {
@@ -6690,7 +7583,9 @@ void gldlDrawTransformFeedbackStream ( GLenum mode, GLuint id, GLuint stream, co
 }
 
 void gldlBeginQueryIndexed ( GLenum target, GLuint index, GLuint id, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBeginQueryIndexed( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBeginQueryIndexed( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 5 );
     if( breakpoint >= 0 ) {
@@ -6701,7 +7596,9 @@ void gldlBeginQueryIndexed ( GLenum target, GLuint index, GLuint id, const char 
 }
 
 void gldlEndQueryIndexed ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glEndQueryIndexed( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glEndQueryIndexed( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 124 );
     if( breakpoint >= 0 ) {
@@ -6712,7 +7609,9 @@ void gldlEndQueryIndexed ( GLenum target, GLuint index, const char *arg0, const 
 }
 
 void gldlGetQueryIndexediv ( GLenum target, GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetQueryIndexediv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetQueryIndexediv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 191 );
     if( breakpoint >= 0 ) {
@@ -6723,7 +7622,9 @@ void gldlGetQueryIndexediv ( GLenum target, GLuint index, GLenum pname, GLint *p
 }
 
 void gldlReleaseShaderCompiler ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glReleaseShaderCompiler();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glReleaseShaderCompiler();\n", file, line );
 
     int breakpoint = DebugTest( 360 );
     if( breakpoint >= 0 ) {
@@ -6734,7 +7635,9 @@ void gldlReleaseShaderCompiler ( const char *file, int line ) {
 }
 
 void gldlShaderBinary ( GLsizei count, const GLuint *shaders, GLenum binaryformat, const GLvoid *binary, GLsizei length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glShaderBinary( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glShaderBinary( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 378 );
     if( breakpoint >= 0 ) {
@@ -6745,7 +7648,9 @@ void gldlShaderBinary ( GLsizei count, const GLuint *shaders, GLenum binaryforma
 }
 
 void gldlGetShaderPrecisionFormat ( GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetShaderPrecisionFormat( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetShaderPrecisionFormat( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 203 );
     if( breakpoint >= 0 ) {
@@ -6756,7 +7661,9 @@ void gldlGetShaderPrecisionFormat ( GLenum shadertype, GLenum precisiontype, GLi
 }
 
 void gldlDepthRangef ( GLclampf n, GLclampf f, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDepthRangef( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDepthRangef( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 95 );
     if( breakpoint >= 0 ) {
@@ -6767,7 +7674,9 @@ void gldlDepthRangef ( GLclampf n, GLclampf f, const char *arg0, const char *arg
 }
 
 void gldlClearDepthf ( GLclampf d, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glClearDepthf( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glClearDepthf( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 46 );
     if( breakpoint >= 0 ) {
@@ -6778,7 +7687,9 @@ void gldlClearDepthf ( GLclampf d, const char *arg0, const char *file, int line 
 }
 
 void gldlGetProgramBinary ( GLuint program, GLsizei bufSize, GLsizei *length, GLenum *binaryFormat, GLvoid *binary, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetProgramBinary( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetProgramBinary( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 185 );
     if( breakpoint >= 0 ) {
@@ -6789,7 +7700,9 @@ void gldlGetProgramBinary ( GLuint program, GLsizei bufSize, GLsizei *length, GL
 }
 
 void gldlProgramBinary ( GLuint program, GLenum binaryFormat, const GLvoid *binary, GLsizei length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramBinary( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramBinary( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 303 );
     if( breakpoint >= 0 ) {
@@ -6800,7 +7713,9 @@ void gldlProgramBinary ( GLuint program, GLenum binaryFormat, const GLvoid *bina
 }
 
 void gldlProgramParameteri ( GLuint program, GLenum pname, GLint value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramParameteri( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 304 );
     if( breakpoint >= 0 ) {
@@ -6811,7 +7726,9 @@ void gldlProgramParameteri ( GLuint program, GLenum pname, GLint value, const ch
 }
 
 void gldlUseProgramStages ( GLuint pipeline, GLbitfield stages, GLuint program, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glUseProgramStages( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glUseProgramStages( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 470 );
     if( breakpoint >= 0 ) {
@@ -6822,7 +7739,9 @@ void gldlUseProgramStages ( GLuint pipeline, GLbitfield stages, GLuint program, 
 }
 
 void gldlActiveShaderProgram ( GLuint pipeline, GLuint program, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glActiveShaderProgram( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glActiveShaderProgram( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 0 );
     if( breakpoint >= 0 ) {
@@ -6833,7 +7752,9 @@ void gldlActiveShaderProgram ( GLuint pipeline, GLuint program, const char *arg0
 }
 
 GLuint gldlCreateShaderProgramv ( GLenum type, GLsizei count, const GLchar* *strings, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCreateShaderProgramv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCreateShaderProgramv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 71 );
     if( breakpoint >= 0 ) {
@@ -6844,7 +7765,9 @@ GLuint gldlCreateShaderProgramv ( GLenum type, GLsizei count, const GLchar* *str
 }
 
 void gldlBindProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindProgramPipeline( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindProgramPipeline( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 15 );
     if( breakpoint >= 0 ) {
@@ -6855,7 +7778,9 @@ void gldlBindProgramPipeline ( GLuint pipeline, const char *arg0, const char *fi
 }
 
 void gldlDeleteProgramPipelines ( GLsizei n, const GLuint *pipelines, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDeleteProgramPipelines( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDeleteProgramPipelines( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 81 );
     if( breakpoint >= 0 ) {
@@ -6866,7 +7791,9 @@ void gldlDeleteProgramPipelines ( GLsizei n, const GLuint *pipelines, const char
 }
 
 void gldlGenProgramPipelines ( GLsizei n, GLuint *pipelines, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGenProgramPipelines( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGenProgramPipelines( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 139 );
     if( breakpoint >= 0 ) {
@@ -6877,7 +7804,9 @@ void gldlGenProgramPipelines ( GLsizei n, GLuint *pipelines, const char *arg0, c
 }
 
 GLboolean gldlIsProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glIsProgramPipeline( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glIsProgramPipeline( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 259 );
     if( breakpoint >= 0 ) {
@@ -6888,7 +7817,9 @@ GLboolean gldlIsProgramPipeline ( GLuint pipeline, const char *arg0, const char 
 }
 
 void gldlGetProgramPipelineiv ( GLuint pipeline, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetProgramPipelineiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetProgramPipelineiv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 188 );
     if( breakpoint >= 0 ) {
@@ -6899,7 +7830,9 @@ void gldlGetProgramPipelineiv ( GLuint pipeline, GLenum pname, GLint *params, co
 }
 
 void gldlProgramUniform1i ( GLuint program, GLint location, GLint v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform1i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform1i( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 309 );
     if( breakpoint >= 0 ) {
@@ -6910,7 +7843,9 @@ void gldlProgramUniform1i ( GLuint program, GLint location, GLint v0, const char
 }
 
 void gldlProgramUniform1iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform1iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform1iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 310 );
     if( breakpoint >= 0 ) {
@@ -6921,7 +7856,9 @@ void gldlProgramUniform1iv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform1f ( GLuint program, GLint location, GLfloat v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform1f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform1f( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 307 );
     if( breakpoint >= 0 ) {
@@ -6932,7 +7869,9 @@ void gldlProgramUniform1f ( GLuint program, GLint location, GLfloat v0, const ch
 }
 
 void gldlProgramUniform1fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform1fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform1fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 308 );
     if( breakpoint >= 0 ) {
@@ -6943,7 +7882,9 @@ void gldlProgramUniform1fv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform1d ( GLuint program, GLint location, GLdouble v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform1d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform1d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 305 );
     if( breakpoint >= 0 ) {
@@ -6954,7 +7895,9 @@ void gldlProgramUniform1d ( GLuint program, GLint location, GLdouble v0, const c
 }
 
 void gldlProgramUniform1dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform1dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform1dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 306 );
     if( breakpoint >= 0 ) {
@@ -6965,7 +7908,9 @@ void gldlProgramUniform1dv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform1ui ( GLuint program, GLint location, GLuint v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform1ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform1ui( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 311 );
     if( breakpoint >= 0 ) {
@@ -6976,7 +7921,9 @@ void gldlProgramUniform1ui ( GLuint program, GLint location, GLuint v0, const ch
 }
 
 void gldlProgramUniform1uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform1uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform1uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 312 );
     if( breakpoint >= 0 ) {
@@ -6987,7 +7934,9 @@ void gldlProgramUniform1uiv ( GLuint program, GLint location, GLsizei count, con
 }
 
 void gldlProgramUniform2i ( GLuint program, GLint location, GLint v0, GLint v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform2i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform2i( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 317 );
     if( breakpoint >= 0 ) {
@@ -6998,7 +7947,9 @@ void gldlProgramUniform2i ( GLuint program, GLint location, GLint v0, GLint v1, 
 }
 
 void gldlProgramUniform2iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform2iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform2iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 318 );
     if( breakpoint >= 0 ) {
@@ -7009,7 +7960,9 @@ void gldlProgramUniform2iv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform2f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform2f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform2f( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 315 );
     if( breakpoint >= 0 ) {
@@ -7020,7 +7973,9 @@ void gldlProgramUniform2f ( GLuint program, GLint location, GLfloat v0, GLfloat 
 }
 
 void gldlProgramUniform2fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform2fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 316 );
     if( breakpoint >= 0 ) {
@@ -7031,7 +7986,9 @@ void gldlProgramUniform2fv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform2d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform2d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform2d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 313 );
     if( breakpoint >= 0 ) {
@@ -7042,7 +7999,9 @@ void gldlProgramUniform2d ( GLuint program, GLint location, GLdouble v0, GLdoubl
 }
 
 void gldlProgramUniform2dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform2dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 314 );
     if( breakpoint >= 0 ) {
@@ -7053,7 +8012,9 @@ void gldlProgramUniform2dv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform2ui ( GLuint program, GLint location, GLuint v0, GLuint v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform2ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform2ui( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 319 );
     if( breakpoint >= 0 ) {
@@ -7064,7 +8025,9 @@ void gldlProgramUniform2ui ( GLuint program, GLint location, GLuint v0, GLuint v
 }
 
 void gldlProgramUniform2uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform2uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform2uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 320 );
     if( breakpoint >= 0 ) {
@@ -7075,7 +8038,9 @@ void gldlProgramUniform2uiv ( GLuint program, GLint location, GLsizei count, con
 }
 
 void gldlProgramUniform3i ( GLuint program, GLint location, GLint v0, GLint v1, GLint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform3i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform3i( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 325 );
     if( breakpoint >= 0 ) {
@@ -7086,7 +8051,9 @@ void gldlProgramUniform3i ( GLuint program, GLint location, GLint v0, GLint v1, 
 }
 
 void gldlProgramUniform3iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform3iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform3iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 326 );
     if( breakpoint >= 0 ) {
@@ -7097,7 +8064,9 @@ void gldlProgramUniform3iv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform3f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform3f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform3f( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 323 );
     if( breakpoint >= 0 ) {
@@ -7108,7 +8077,9 @@ void gldlProgramUniform3f ( GLuint program, GLint location, GLfloat v0, GLfloat 
 }
 
 void gldlProgramUniform3fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform3fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 324 );
     if( breakpoint >= 0 ) {
@@ -7119,7 +8090,9 @@ void gldlProgramUniform3fv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform3d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, GLdouble v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform3d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform3d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 321 );
     if( breakpoint >= 0 ) {
@@ -7130,7 +8103,9 @@ void gldlProgramUniform3d ( GLuint program, GLint location, GLdouble v0, GLdoubl
 }
 
 void gldlProgramUniform3dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform3dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 322 );
     if( breakpoint >= 0 ) {
@@ -7141,7 +8116,9 @@ void gldlProgramUniform3dv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform3ui ( GLuint program, GLint location, GLuint v0, GLuint v1, GLuint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform3ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform3ui( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 327 );
     if( breakpoint >= 0 ) {
@@ -7152,7 +8129,9 @@ void gldlProgramUniform3ui ( GLuint program, GLint location, GLuint v0, GLuint v
 }
 
 void gldlProgramUniform3uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform3uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform3uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 328 );
     if( breakpoint >= 0 ) {
@@ -7163,7 +8142,9 @@ void gldlProgramUniform3uiv ( GLuint program, GLint location, GLsizei count, con
 }
 
 void gldlProgramUniform4i ( GLuint program, GLint location, GLint v0, GLint v1, GLint v2, GLint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform4i( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform4i( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 333 );
     if( breakpoint >= 0 ) {
@@ -7174,7 +8155,9 @@ void gldlProgramUniform4i ( GLuint program, GLint location, GLint v0, GLint v1, 
 }
 
 void gldlProgramUniform4iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform4iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform4iv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 334 );
     if( breakpoint >= 0 ) {
@@ -7185,7 +8168,9 @@ void gldlProgramUniform4iv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform4f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform4f( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform4f( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 331 );
     if( breakpoint >= 0 ) {
@@ -7196,7 +8181,9 @@ void gldlProgramUniform4f ( GLuint program, GLint location, GLfloat v0, GLfloat 
 }
 
 void gldlProgramUniform4fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform4fv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 332 );
     if( breakpoint >= 0 ) {
@@ -7207,7 +8194,9 @@ void gldlProgramUniform4fv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform4d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, GLdouble v2, GLdouble v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform4d( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform4d( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 329 );
     if( breakpoint >= 0 ) {
@@ -7218,7 +8207,9 @@ void gldlProgramUniform4d ( GLuint program, GLint location, GLdouble v0, GLdoubl
 }
 
 void gldlProgramUniform4dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform4dv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 330 );
     if( breakpoint >= 0 ) {
@@ -7229,7 +8220,9 @@ void gldlProgramUniform4dv ( GLuint program, GLint location, GLsizei count, cons
 }
 
 void gldlProgramUniform4ui ( GLuint program, GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform4ui( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform4ui( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 335 );
     if( breakpoint >= 0 ) {
@@ -7240,7 +8233,9 @@ void gldlProgramUniform4ui ( GLuint program, GLint location, GLuint v0, GLuint v
 }
 
 void gldlProgramUniform4uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniform4uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniform4uiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 336 );
     if( breakpoint >= 0 ) {
@@ -7251,7 +8246,9 @@ void gldlProgramUniform4uiv ( GLuint program, GLint location, GLsizei count, con
 }
 
 void gldlProgramUniformMatrix2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 338 );
     if( breakpoint >= 0 ) {
@@ -7262,7 +8259,9 @@ void gldlProgramUniformMatrix2fv ( GLuint program, GLint location, GLsizei count
 }
 
 void gldlProgramUniformMatrix3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 344 );
     if( breakpoint >= 0 ) {
@@ -7273,7 +8272,9 @@ void gldlProgramUniformMatrix3fv ( GLuint program, GLint location, GLsizei count
 }
 
 void gldlProgramUniformMatrix4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 350 );
     if( breakpoint >= 0 ) {
@@ -7284,7 +8285,9 @@ void gldlProgramUniformMatrix4fv ( GLuint program, GLint location, GLsizei count
 }
 
 void gldlProgramUniformMatrix2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 337 );
     if( breakpoint >= 0 ) {
@@ -7295,7 +8298,9 @@ void gldlProgramUniformMatrix2dv ( GLuint program, GLint location, GLsizei count
 }
 
 void gldlProgramUniformMatrix3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 343 );
     if( breakpoint >= 0 ) {
@@ -7306,7 +8311,9 @@ void gldlProgramUniformMatrix3dv ( GLuint program, GLint location, GLsizei count
 }
 
 void gldlProgramUniformMatrix4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 349 );
     if( breakpoint >= 0 ) {
@@ -7317,7 +8324,9 @@ void gldlProgramUniformMatrix4dv ( GLuint program, GLint location, GLsizei count
 }
 
 void gldlProgramUniformMatrix2x3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix2x3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 340 );
     if( breakpoint >= 0 ) {
@@ -7328,7 +8337,9 @@ void gldlProgramUniformMatrix2x3fv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix3x2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix3x2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 346 );
     if( breakpoint >= 0 ) {
@@ -7339,7 +8350,9 @@ void gldlProgramUniformMatrix3x2fv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix2x4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix2x4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 342 );
     if( breakpoint >= 0 ) {
@@ -7350,7 +8363,9 @@ void gldlProgramUniformMatrix2x4fv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix4x2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix4x2fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 352 );
     if( breakpoint >= 0 ) {
@@ -7361,7 +8376,9 @@ void gldlProgramUniformMatrix4x2fv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix3x4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix3x4fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 348 );
     if( breakpoint >= 0 ) {
@@ -7372,7 +8389,9 @@ void gldlProgramUniformMatrix3x4fv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix4x3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix4x3fv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 354 );
     if( breakpoint >= 0 ) {
@@ -7383,7 +8402,9 @@ void gldlProgramUniformMatrix4x3fv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix2x3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix2x3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 339 );
     if( breakpoint >= 0 ) {
@@ -7394,7 +8415,9 @@ void gldlProgramUniformMatrix2x3dv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix3x2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix3x2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 345 );
     if( breakpoint >= 0 ) {
@@ -7405,7 +8428,9 @@ void gldlProgramUniformMatrix3x2dv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix2x4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix2x4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix2x4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 341 );
     if( breakpoint >= 0 ) {
@@ -7416,7 +8441,9 @@ void gldlProgramUniformMatrix2x4dv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix4x2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix4x2dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 351 );
     if( breakpoint >= 0 ) {
@@ -7427,7 +8454,9 @@ void gldlProgramUniformMatrix4x2dv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix3x4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix3x4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix3x4dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 347 );
     if( breakpoint >= 0 ) {
@@ -7438,7 +8467,9 @@ void gldlProgramUniformMatrix3x4dv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlProgramUniformMatrix4x3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glProgramUniformMatrix4x3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glProgramUniformMatrix4x3dv( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 353 );
     if( breakpoint >= 0 ) {
@@ -7449,7 +8480,9 @@ void gldlProgramUniformMatrix4x3dv ( GLuint program, GLint location, GLsizei cou
 }
 
 void gldlValidateProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glValidateProgramPipeline( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glValidateProgramPipeline( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 472 );
     if( breakpoint >= 0 ) {
@@ -7460,7 +8493,9 @@ void gldlValidateProgramPipeline ( GLuint pipeline, const char *arg0, const char
 }
 
 void gldlGetProgramPipelineInfoLog ( GLuint pipeline, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetProgramPipelineInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetProgramPipelineInfoLog( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 187 );
     if( breakpoint >= 0 ) {
@@ -7471,7 +8506,9 @@ void gldlGetProgramPipelineInfoLog ( GLuint pipeline, GLsizei bufSize, GLsizei *
 }
 
 void gldlVertexAttribL1d ( GLuint index, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribL1d( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribL1d( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 531 );
     if( breakpoint >= 0 ) {
@@ -7482,7 +8519,9 @@ void gldlVertexAttribL1d ( GLuint index, GLdouble x, const char *arg0, const cha
 }
 
 void gldlVertexAttribL2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribL2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribL2d( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 533 );
     if( breakpoint >= 0 ) {
@@ -7493,7 +8532,9 @@ void gldlVertexAttribL2d ( GLuint index, GLdouble x, GLdouble y, const char *arg
 }
 
 void gldlVertexAttribL3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribL3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribL3d( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 535 );
     if( breakpoint >= 0 ) {
@@ -7504,7 +8545,9 @@ void gldlVertexAttribL3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, con
 }
 
 void gldlVertexAttribL4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribL4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribL4d( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 537 );
     if( breakpoint >= 0 ) {
@@ -7515,7 +8558,9 @@ void gldlVertexAttribL4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLd
 }
 
 void gldlVertexAttribL1dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribL1dv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribL1dv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 532 );
     if( breakpoint >= 0 ) {
@@ -7526,7 +8571,9 @@ void gldlVertexAttribL1dv ( GLuint index, const GLdouble *v, const char *arg0, c
 }
 
 void gldlVertexAttribL2dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribL2dv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribL2dv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 534 );
     if( breakpoint >= 0 ) {
@@ -7537,7 +8584,9 @@ void gldlVertexAttribL2dv ( GLuint index, const GLdouble *v, const char *arg0, c
 }
 
 void gldlVertexAttribL3dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribL3dv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribL3dv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 536 );
     if( breakpoint >= 0 ) {
@@ -7548,7 +8597,9 @@ void gldlVertexAttribL3dv ( GLuint index, const GLdouble *v, const char *arg0, c
 }
 
 void gldlVertexAttribL4dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribL4dv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribL4dv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 538 );
     if( breakpoint >= 0 ) {
@@ -7559,7 +8610,9 @@ void gldlVertexAttribL4dv ( GLuint index, const GLdouble *v, const char *arg0, c
 }
 
 void gldlVertexAttribLPointer ( GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glVertexAttribLPointer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glVertexAttribLPointer( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 539 );
     if( breakpoint >= 0 ) {
@@ -7570,7 +8623,9 @@ void gldlVertexAttribLPointer ( GLuint index, GLint size, GLenum type, GLsizei s
 }
 
 void gldlGetVertexAttribLdv ( GLuint index, GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetVertexAttribLdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetVertexAttribLdv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 229 );
     if( breakpoint >= 0 ) {
@@ -7581,7 +8636,9 @@ void gldlGetVertexAttribLdv ( GLuint index, GLenum pname, GLdouble *params, cons
 }
 
 void gldlViewportArrayv ( GLuint first, GLsizei count, const GLfloat *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glViewportArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glViewportArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 556 );
     if( breakpoint >= 0 ) {
@@ -7592,7 +8649,9 @@ void gldlViewportArrayv ( GLuint first, GLsizei count, const GLfloat *v, const c
 }
 
 void gldlViewportIndexedf ( GLuint index, GLfloat x, GLfloat y, GLfloat w, GLfloat h, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glViewportIndexedf( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glViewportIndexedf( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 557 );
     if( breakpoint >= 0 ) {
@@ -7603,7 +8662,9 @@ void gldlViewportIndexedf ( GLuint index, GLfloat x, GLfloat y, GLfloat w, GLflo
 }
 
 void gldlViewportIndexedfv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glViewportIndexedfv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glViewportIndexedfv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 558 );
     if( breakpoint >= 0 ) {
@@ -7614,7 +8675,9 @@ void gldlViewportIndexedfv ( GLuint index, const GLfloat *v, const char *arg0, c
 }
 
 void gldlScissorArrayv ( GLuint first, GLsizei count, const GLint *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glScissorArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glScissorArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 373 );
     if( breakpoint >= 0 ) {
@@ -7625,7 +8688,9 @@ void gldlScissorArrayv ( GLuint first, GLsizei count, const GLint *v, const char
 }
 
 void gldlScissorIndexed ( GLuint index, GLint left, GLint bottom, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glScissorIndexed( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glScissorIndexed( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 374 );
     if( breakpoint >= 0 ) {
@@ -7636,7 +8701,9 @@ void gldlScissorIndexed ( GLuint index, GLint left, GLint bottom, GLsizei width,
 }
 
 void gldlScissorIndexedv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glScissorIndexedv( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glScissorIndexedv( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 375 );
     if( breakpoint >= 0 ) {
@@ -7647,7 +8714,9 @@ void gldlScissorIndexedv ( GLuint index, const GLint *v, const char *arg0, const
 }
 
 void gldlDepthRangeArrayv ( GLuint first, GLsizei count, const GLclampd *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDepthRangeArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDepthRangeArrayv( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 93 );
     if( breakpoint >= 0 ) {
@@ -7658,7 +8727,9 @@ void gldlDepthRangeArrayv ( GLuint first, GLsizei count, const GLclampd *v, cons
 }
 
 void gldlDepthRangeIndexed ( GLuint index, GLclampd n, GLclampd f, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDepthRangeIndexed( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDepthRangeIndexed( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 94 );
     if( breakpoint >= 0 ) {
@@ -7669,7 +8740,9 @@ void gldlDepthRangeIndexed ( GLuint index, GLclampd n, GLclampd f, const char *a
 }
 
 void gldlGetFloati_v ( GLenum target, GLuint index, GLfloat *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetFloati_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetFloati_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 170 );
     if( breakpoint >= 0 ) {
@@ -7680,7 +8753,9 @@ void gldlGetFloati_v ( GLenum target, GLuint index, GLfloat *data, const char *a
 }
 
 void gldlGetDoublei_v ( GLenum target, GLuint index, GLdouble *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetDoublei_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetDoublei_v( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 167 );
     if( breakpoint >= 0 ) {
@@ -7691,7 +8766,9 @@ void gldlGetDoublei_v ( GLenum target, GLuint index, GLdouble *data, const char 
 }
 
 GLsync gldlCreateSyncFromCLeventARB ( struct _cl_context * context, struct _cl_event * event, GLbitfield flags, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glCreateSyncFromCLeventARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glCreateSyncFromCLeventARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 72 );
     if( breakpoint >= 0 ) {
@@ -7702,7 +8779,9 @@ GLsync gldlCreateSyncFromCLeventARB ( struct _cl_context * context, struct _cl_e
 }
 
 void gldlDebugMessageControlARB ( GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint *ids, GLboolean enabled, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDebugMessageControlARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDebugMessageControlARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 75 );
     if( breakpoint >= 0 ) {
@@ -7713,7 +8792,9 @@ void gldlDebugMessageControlARB ( GLenum source, GLenum type, GLenum severity, G
 }
 
 void gldlDebugMessageInsertARB ( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *buf, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDebugMessageInsertARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDebugMessageInsertARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 76 );
     if( breakpoint >= 0 ) {
@@ -7724,7 +8805,9 @@ void gldlDebugMessageInsertARB ( GLenum source, GLenum type, GLuint id, GLenum s
 }
 
 void gldlDebugMessageCallbackARB ( GLDEBUGPROCARB callback, const GLvoid *userParam, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDebugMessageCallbackARB( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDebugMessageCallbackARB( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 74 );
     if( breakpoint >= 0 ) {
@@ -7735,7 +8818,9 @@ void gldlDebugMessageCallbackARB ( GLDEBUGPROCARB callback, const GLvoid *userPa
 }
 
 GLuint gldlGetDebugMessageLogARB ( GLuint count, GLsizei bufsize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetDebugMessageLogARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetDebugMessageLogARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
     int breakpoint = DebugTest( 166 );
     if( breakpoint >= 0 ) {
@@ -7746,7 +8831,9 @@ GLuint gldlGetDebugMessageLogARB ( GLuint count, GLsizei bufsize, GLenum *source
 }
 
 GLenum gldlGetGraphicsResetStatusARB ( const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetGraphicsResetStatusARB();\n", file, line );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetGraphicsResetStatusARB();\n", file, line );
 
     int breakpoint = DebugTest( 175 );
     if( breakpoint >= 0 ) {
@@ -7757,7 +8844,9 @@ GLenum gldlGetGraphicsResetStatusARB ( const char *file, int line ) {
 }
 
 void gldlGetnMapdvARB ( GLenum target, GLenum query, GLsizei bufSize, GLdouble *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnMapdvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnMapdvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 238 );
     if( breakpoint >= 0 ) {
@@ -7768,7 +8857,9 @@ void gldlGetnMapdvARB ( GLenum target, GLenum query, GLsizei bufSize, GLdouble *
 }
 
 void gldlGetnMapfvARB ( GLenum target, GLenum query, GLsizei bufSize, GLfloat *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnMapfvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnMapfvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 239 );
     if( breakpoint >= 0 ) {
@@ -7779,7 +8870,9 @@ void gldlGetnMapfvARB ( GLenum target, GLenum query, GLsizei bufSize, GLfloat *v
 }
 
 void gldlGetnMapivARB ( GLenum target, GLenum query, GLsizei bufSize, GLint *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnMapivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnMapivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 240 );
     if( breakpoint >= 0 ) {
@@ -7790,7 +8883,9 @@ void gldlGetnMapivARB ( GLenum target, GLenum query, GLsizei bufSize, GLint *v, 
 }
 
 void gldlGetnPixelMapfvARB ( GLenum map, GLsizei bufSize, GLfloat *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnPixelMapfvARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnPixelMapfvARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 242 );
     if( breakpoint >= 0 ) {
@@ -7801,7 +8896,9 @@ void gldlGetnPixelMapfvARB ( GLenum map, GLsizei bufSize, GLfloat *values, const
 }
 
 void gldlGetnPixelMapuivARB ( GLenum map, GLsizei bufSize, GLuint *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnPixelMapuivARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnPixelMapuivARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 243 );
     if( breakpoint >= 0 ) {
@@ -7812,7 +8909,9 @@ void gldlGetnPixelMapuivARB ( GLenum map, GLsizei bufSize, GLuint *values, const
 }
 
 void gldlGetnPixelMapusvARB ( GLenum map, GLsizei bufSize, GLushort *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnPixelMapusvARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnPixelMapusvARB( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 244 );
     if( breakpoint >= 0 ) {
@@ -7823,7 +8922,9 @@ void gldlGetnPixelMapusvARB ( GLenum map, GLsizei bufSize, GLushort *values, con
 }
 
 void gldlGetnPolygonStippleARB ( GLsizei bufSize, GLubyte *pattern, const char *arg0, const char *arg1, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnPolygonStippleARB( %s, %s );\n", file, line, arg0,  arg1 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnPolygonStippleARB( %s, %s );\n", file, line, arg0,  arg1 );
 
     int breakpoint = DebugTest( 245 );
     if( breakpoint >= 0 ) {
@@ -7834,7 +8935,9 @@ void gldlGetnPolygonStippleARB ( GLsizei bufSize, GLubyte *pattern, const char *
 }
 
 void gldlGetnColorTableARB ( GLenum target, GLenum format, GLenum type, GLsizei bufSize, GLvoid *table, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnColorTableARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnColorTableARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 234 );
     if( breakpoint >= 0 ) {
@@ -7845,7 +8948,9 @@ void gldlGetnColorTableARB ( GLenum target, GLenum format, GLenum type, GLsizei 
 }
 
 void gldlGetnConvolutionFilterARB ( GLenum target, GLenum format, GLenum type, GLsizei bufSize, GLvoid *image, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnConvolutionFilterARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnConvolutionFilterARB( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 236 );
     if( breakpoint >= 0 ) {
@@ -7856,7 +8961,9 @@ void gldlGetnConvolutionFilterARB ( GLenum target, GLenum format, GLenum type, G
 }
 
 void gldlGetnSeparableFilterARB ( GLenum target, GLenum format, GLenum type, GLsizei rowBufSize, GLvoid *row, GLsizei columnBufSize, GLvoid *column, GLvoid *span, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnSeparableFilterARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnSeparableFilterARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
     int breakpoint = DebugTest( 246 );
     if( breakpoint >= 0 ) {
@@ -7867,7 +8974,9 @@ void gldlGetnSeparableFilterARB ( GLenum target, GLenum format, GLenum type, GLs
 }
 
 void gldlGetnHistogramARB ( GLenum target, GLboolean reset, GLenum format, GLenum type, GLsizei bufSize, GLvoid *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnHistogramARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnHistogramARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 237 );
     if( breakpoint >= 0 ) {
@@ -7878,7 +8987,9 @@ void gldlGetnHistogramARB ( GLenum target, GLboolean reset, GLenum format, GLenu
 }
 
 void gldlGetnMinmaxARB ( GLenum target, GLboolean reset, GLenum format, GLenum type, GLsizei bufSize, GLvoid *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnMinmaxARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnMinmaxARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 241 );
     if( breakpoint >= 0 ) {
@@ -7889,7 +9000,9 @@ void gldlGetnMinmaxARB ( GLenum target, GLboolean reset, GLenum format, GLenum t
 }
 
 void gldlGetnTexImageARB ( GLenum target, GLint level, GLenum format, GLenum type, GLsizei bufSize, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnTexImageARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnTexImageARB( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 247 );
     if( breakpoint >= 0 ) {
@@ -7900,7 +9013,9 @@ void gldlGetnTexImageARB ( GLenum target, GLint level, GLenum format, GLenum typ
 }
 
 void gldlReadnPixelsARB ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glReadnPixelsARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glReadnPixelsARB( %s, %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5, arg6,  arg7 );
 
     int breakpoint = DebugTest( 359 );
     if( breakpoint >= 0 ) {
@@ -7911,7 +9026,9 @@ void gldlReadnPixelsARB ( GLint x, GLint y, GLsizei width, GLsizei height, GLenu
 }
 
 void gldlGetnCompressedTexImageARB ( GLenum target, GLint lod, GLsizei bufSize, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnCompressedTexImageARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnCompressedTexImageARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 235 );
     if( breakpoint >= 0 ) {
@@ -7922,7 +9039,9 @@ void gldlGetnCompressedTexImageARB ( GLenum target, GLint lod, GLsizei bufSize, 
 }
 
 void gldlGetnUniformfvARB ( GLuint program, GLint location, GLsizei bufSize, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnUniformfvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnUniformfvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 249 );
     if( breakpoint >= 0 ) {
@@ -7933,7 +9052,9 @@ void gldlGetnUniformfvARB ( GLuint program, GLint location, GLsizei bufSize, GLf
 }
 
 void gldlGetnUniformivARB ( GLuint program, GLint location, GLsizei bufSize, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnUniformivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnUniformivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 250 );
     if( breakpoint >= 0 ) {
@@ -7944,7 +9065,9 @@ void gldlGetnUniformivARB ( GLuint program, GLint location, GLsizei bufSize, GLi
 }
 
 void gldlGetnUniformuivARB ( GLuint program, GLint location, GLsizei bufSize, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnUniformuivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnUniformuivARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 251 );
     if( breakpoint >= 0 ) {
@@ -7955,7 +9078,9 @@ void gldlGetnUniformuivARB ( GLuint program, GLint location, GLsizei bufSize, GL
 }
 
 void gldlGetnUniformdvARB ( GLuint program, GLint location, GLsizei bufSize, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetnUniformdvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetnUniformdvARB( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 248 );
     if( breakpoint >= 0 ) {
@@ -7966,7 +9091,9 @@ void gldlGetnUniformdvARB ( GLuint program, GLint location, GLsizei bufSize, GLd
 }
 
 void gldlDrawArraysInstancedBaseInstance ( GLenum mode, GLint first, GLsizei count, GLsizei primcount, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawArraysInstancedBaseInstance( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawArraysInstancedBaseInstance( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 103 );
     if( breakpoint >= 0 ) {
@@ -7977,7 +9104,9 @@ void gldlDrawArraysInstancedBaseInstance ( GLenum mode, GLint first, GLsizei cou
 }
 
 void gldlDrawElementsInstancedBaseInstance ( GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseInstance( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawElementsInstancedBaseInstance( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 110 );
     if( breakpoint >= 0 ) {
@@ -7988,7 +9117,9 @@ void gldlDrawElementsInstancedBaseInstance ( GLenum mode, GLsizei count, GLenum 
 }
 
 void gldlDrawElementsInstancedBaseVertexBaseInstance ( GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount, GLint basevertex, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawElementsInstancedBaseVertexBaseInstance( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawElementsInstancedBaseVertexBaseInstance( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 112 );
     if( breakpoint >= 0 ) {
@@ -7999,7 +9130,9 @@ void gldlDrawElementsInstancedBaseVertexBaseInstance ( GLenum mode, GLsizei coun
 }
 
 void gldlDrawTransformFeedbackInstanced ( GLenum mode, GLuint id, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawTransformFeedbackInstanced( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawTransformFeedbackInstanced( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
 
     int breakpoint = DebugTest( 116 );
     if( breakpoint >= 0 ) {
@@ -8010,7 +9143,9 @@ void gldlDrawTransformFeedbackInstanced ( GLenum mode, GLuint id, GLsizei primco
 }
 
 void gldlDrawTransformFeedbackStreamInstanced ( GLenum mode, GLuint id, GLuint stream, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glDrawTransformFeedbackStreamInstanced( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glDrawTransformFeedbackStreamInstanced( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 118 );
     if( breakpoint >= 0 ) {
@@ -8021,7 +9156,9 @@ void gldlDrawTransformFeedbackStreamInstanced ( GLenum mode, GLuint id, GLuint s
 }
 
 void gldlGetInternalformativ ( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetInternalformativ( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetInternalformativ( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 180 );
     if( breakpoint >= 0 ) {
@@ -8032,7 +9169,9 @@ void gldlGetInternalformativ ( GLenum target, GLenum internalformat, GLenum pnam
 }
 
 void gldlGetActiveAtomicCounterBufferiv ( GLuint program, GLuint bufferIndex, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glGetActiveAtomicCounterBufferiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glGetActiveAtomicCounterBufferiv( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 147 );
     if( breakpoint >= 0 ) {
@@ -8043,7 +9182,9 @@ void gldlGetActiveAtomicCounterBufferiv ( GLuint program, GLuint bufferIndex, GL
 }
 
 void gldlBindImageTexture ( GLuint unit, GLuint texture, GLint level, GLboolean layered, GLint layer, GLenum access, GLenum format, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glBindImageTexture( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glBindImageTexture( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 14 );
     if( breakpoint >= 0 ) {
@@ -8054,7 +9195,9 @@ void gldlBindImageTexture ( GLuint unit, GLuint texture, GLint level, GLboolean 
 }
 
 void gldlMemoryBarrier ( GLbitfield barriers, const char *arg0, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glMemoryBarrier( %s );\n", file, line,  arg0 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glMemoryBarrier( %s );\n", file, line,  arg0 );
 
     int breakpoint = DebugTest( 273 );
     if( breakpoint >= 0 ) {
@@ -8065,7 +9208,9 @@ void gldlMemoryBarrier ( GLbitfield barriers, const char *arg0, const char *file
 }
 
 void gldlTexStorage1D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexStorage1D( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexStorage1D( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
 
     int breakpoint = DebugTest( 406 );
     if( breakpoint >= 0 ) {
@@ -8076,7 +9221,9 @@ void gldlTexStorage1D ( GLenum target, GLsizei levels, GLenum internalformat, GL
 }
 
 void gldlTexStorage2D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexStorage2D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexStorage2D( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 407 );
     if( breakpoint >= 0 ) {
@@ -8087,7 +9234,9 @@ void gldlTexStorage2D ( GLenum target, GLsizei levels, GLenum internalformat, GL
 }
 
 void gldlTexStorage3D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTexStorage3D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTexStorage3D( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 408 );
     if( breakpoint >= 0 ) {
@@ -8098,7 +9247,9 @@ void gldlTexStorage3D ( GLenum target, GLsizei levels, GLenum internalformat, GL
 }
 
 void gldlTextureStorage1DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTextureStorage1DEXT( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTextureStorage1DEXT( %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3,  arg4 );
 
     int breakpoint = DebugTest( 412 );
     if( breakpoint >= 0 ) {
@@ -8109,7 +9260,9 @@ void gldlTextureStorage1DEXT ( GLuint texture, GLenum target, GLsizei levels, GL
 }
 
 void gldlTextureStorage2DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTextureStorage2DEXT( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTextureStorage2DEXT( %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4,  arg5 );
 
     int breakpoint = DebugTest( 413 );
     if( breakpoint >= 0 ) {
@@ -8120,7 +9273,9 @@ void gldlTextureStorage2DEXT ( GLuint texture, GLenum target, GLsizei levels, GL
 }
 
 void gldlTextureStorage3DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
-	fprintf( trace, "call<%s,%d>: glTextureStorage3DEXT( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
+    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: glTextureStorage3DEXT( %s, %s, %s, %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2, arg3, arg4, arg5,  arg6 );
 
     int breakpoint = DebugTest( 414 );
     if( breakpoint >= 0 ) {

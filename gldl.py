@@ -1,8 +1,33 @@
 #!/usr/bin/env python
 import re
+import urllib2
+import os
+
+print "GLDL gen script 0.5"
+
+# Make folder hierarchy
+#   GL/         --  GL3/    --  gl3.h
+#   gldl.py         gldl.h
+#                   gldl.c
+if not os.path.exists( "GL/GL3" ) :
+    os.makedirs( "GL/GL3" )
+
+
+# Download header from opengl.org
+if not os.path.exists( "GL/GL3/gl3.h" ) :
+    print "Downloading gl3.h from opengl.org to GL/GL3..."
+    gl3_url = urllib2.urlopen( "http://www.opengl.org/registry/api/gl3.h" )
+    gl3_src = open( "GL/GL3/gl3.h", "w" )
+    gl3_src.writelines( gl3_url.readlines() )
+    gl3_src.close()
+else :
+    print "OpenGL header gl3.h exists in GL/GL3. Reusing..."
+
+
+print "Parsing OpenGL header..."
 
 # Open GL3 header
-gl3_src = open( "GL3/gl3.h", "r" )
+gl3_src = open( "GL/GL3/gl3.h", "r" )
 
 # Get all GL procedures
 return_types = []
@@ -43,9 +68,10 @@ sorted_names = sorted( names )
 
 
 
+print "Generating GL/gldl.h header file..."
 
 # Write GLDL header
-gldl_h = open( "gldl.h", "w" )
+gldl_h = open( "GL/gldl.h", "w" )
 
 gldl_h.write( r'''
 #ifndef __GLDL_H
@@ -66,8 +92,9 @@ extern "C" {
 
 // GLDL API functions
 int gldlInit();
-//void gldlTerminate();
 int gldlIsSupported( unsigned int major, unsigned int minor );
+void gldlBeginTrace( unsigned int trace_n );
+void gldlEndTrace( unsigned int trace_n );
 
 
 // Debug version of GL functions
@@ -120,9 +147,10 @@ gldl_h.write( r'''
 
 
 
+print "Generating GL/gldl.c source file..."
 
 # Write GLDL src
-gldl_c = open( "gldl.c", "w" )
+gldl_c = open( "GL/gldl.c", "w" )
 
 gldl_c.write( r'''
 #include "gldl.h"
@@ -133,7 +161,7 @@ gldl_c.write( r'''
 
 
 //////////////////////////////////////////
-// Jump to line 1138 for GLDL API functions
+// Jump to line 1145 for GLDL API functions
 //////////////////////////////////////////
 
 
@@ -146,7 +174,11 @@ for i in range( len(names) ) :
     gldl_c.write( "PFN" + names[i].upper() + "PROC gldl" + names[i][2:] + "_impl;\n" )
 
 gldl_c.write( r'''
-char *gl_functions[''' + str(len(names)) + '''] = { 
+// GL function number
+#define GLDL_FUNC_N ''' + str(len(names)) + '''
+
+// String array of all GL function names
+char *gl_functions[GLDL_FUNC_N] = { 
 ''')
 
 for name in sorted_names :
@@ -162,9 +194,6 @@ gldl_c.write( r'''};
 #   include <windows.h>
 
 #warning GLDL_WIN32
-// MAC
-#elif defined(__APPLE__) || defined(__APPLE_CC__)
-
 // UNIX
 #else
 #include <dlfcn.h>
@@ -217,12 +246,22 @@ void ShowTexture() {
 // ###################################################################
 // API FUNCTIONS
 
-FILE *trace = NULL;         // Trace log file
-int break_functions[512];   // Breakpoints storing array
+static int gldl_init = 0;                   // Assure that gldl has been init
+static int break_functions[GLDL_FUNC_N];    // Breakpoints storing array
+
+// GL function call traces
+// First trace is the init trace (trace until first glClear())
+// Five traces after that are custom traces (activated by gldlBeginTrace(n))
+#define TRACE_N 6
+static struct s_ct {
+    FILE        *f;
+    int         started;
+} traces[TRACE_N];
+
 
 static struct {
-    GLint major,
-          minor;
+    GLint       major,
+                minor;
 } gl_version;
 
 
@@ -232,6 +271,7 @@ static int DebugTest( int func_index );
 static void DebugFunction();
 static void LoadProcs();
 
+
 // Public functions
 
 int gldlInit() {
@@ -239,22 +279,21 @@ int gldlInit() {
     LoadProcs();
     CloseLib();
 
+    gldl_init = GetGLVersion();
 
-    trace = fopen( "trace.log", "w" );
+    if( gldl_init ) {
+        memset( traces, 0, TRACE_N * sizeof(struct s_ct) );
+        traces[0].f = fopen( "trace_init.log", "w" );
+        traces[0].started = 1;
 
-    //InitFunctionArray();
+        memset( break_functions, -1, GLDL_FUNC_N * sizeof(int) );
+        DebugFunction();
+    }
+    
 
-    memset( break_functions, -1, 512 * sizeof(int) );
-    DebugFunction();
-
-    return GetGLVersion();
+    return gldl_init;
 }
-/*
-void gldlTerminate() {
-    fclose( trace );
-    DestroyFunctionArray();
-}
-*/
+
 int gldlIsSupported( unsigned int major, unsigned int minor ) {
     if( major < 3 ) return 0;
     if( major > gl_version.major ) return 1;
@@ -262,22 +301,41 @@ int gldlIsSupported( unsigned int major, unsigned int minor ) {
     return ( major == gl_version.major && minor >= gl_version.minor );
 }
 
+void gldlBeginTrace( unsigned int trace_n ) {
+    if( !trace_n || trace_n >= TRACE_N ) return;
+
+    if( !traces[trace_n].f ) {
+        char filename[16];
+        sprintf( filename, "trace%d.log", trace_n );
+
+        traces[trace_n].f = fopen( filename, "w" );
+    }
+
+    traces[trace_n].started = 1;
+}
+
+void gldlEndTrace( unsigned int trace_n ) {
+    if( !trace_n || trace_n >= TRACE_N ) return;
+
+    traces[trace_n].started = 0;
+}
 
 // Private functions
 
 // Store the used GL version in the gl_version struct
+// Returns 1 if Core Profile loaded correctly
 static int GetGLVersion() {
     gldlGetIntegerv_impl( GL_MAJOR_VERSION, &gl_version.major );
     gldlGetIntegerv_impl( GL_MINOR_VERSION, &gl_version.minor );
 
-    if( gl_version.major < 3 ) return -1;
+    if( gl_version.major < 3 ) return 0;
 
-    return 0;
+    return 1;
 }
 
 // Check if a breakpoint is set on the given function
 static int DebugTest( int func_index ) {
-    for( int i = 0; i < 512; ++i ) {
+    for( int i = 0; i < GLDL_FUNC_N; ++i ) {
         if( -1 == break_functions[i] ) 
             break;
         if( func_index == break_functions[i] ) 
@@ -315,7 +373,7 @@ static void DebugFunction() {
             // check for breakpoints listing
             else if( !strcmp( cmd_buf, "l" ) || !strcmp( cmd_buf, "list" ) ) {
                 int found_one = 0;
-                for( int i = 0; i < 512; ++i ) {
+                for( int i = 0; i < GLDL_FUNC_N; ++i ) {
                     if( -1 == break_functions[i] ) break;
                     if( -2 == break_functions[i] ) continue;
                     printf( "Breakpoint %d on function %s()\n", i, gl_functions[break_functions[i]] );
@@ -352,7 +410,7 @@ static void DebugFunction() {
 
                 if( index >= 0 )
                     // insert function name index in next free spot
-                    for( int i = 0; i < 512; ++i )
+                    for( int i = 0; i < GLDL_FUNC_N; ++i )
                         if( 0 > break_functions[i] ) {
                             break_functions[i] = index;
                             printf( "Breakpoint %d, %s()\\n", i, param_buf );
@@ -369,7 +427,7 @@ static void DebugFunction() {
                 // if param, delete wanted breakpoint
                 if( 2 == scan_ret ) {
                     int index = atoi( param_buf );
-                    if( index < 0 || index >= 512  || ( !index && strcmp( param_buf, "0" ) ) || -1 == break_functions[index] ) {
+                    if( index < 0 || index >= GLDL_FUNC_N  || ( !index && strcmp( param_buf, "0" ) ) || -1 == break_functions[index] ) {
                         printf( "Breakpoint %s does not exist\\n", param_buf );
                     } else {
                         break_functions[index] = -2;
@@ -387,7 +445,7 @@ static void DebugFunction() {
                     if( 'n' == c )
                         break;
                     if( 'y' == c ) {
-                        for( int i = 0; i < 512; ++i ) {
+                        for( int i = 0; i < GLDL_FUNC_N; ++i ) {
                             if( -1 == break_functions[i] ) break;
                             break_functions[i] = -1;
                         }
@@ -459,8 +517,19 @@ for i in range( len(names) ) :
             gldl_c.write( "const char *arg" + str(j) + ", " )
         gldl_c.write( "const char *arg" + str(parameters_n[i]-1) + ", const char *file, int line ) {\n" )
 
-    # Write trace
-    gldl_c.write( "\tfprintf( trace, \"call<%s,%d>: " + names[i] + "(" )
+    # If glClear, add init_trace ending
+    if names[i] == "glClear" :
+        gldl_c.write( r'''    if( traces[0].started ) {
+        traces[0].started = 0;
+        fclose( traces[0].f );
+    }
+
+    ''' )
+
+    # Write traces
+    gldl_c.write( r'''    for( int i = 0; i < TRACE_N; ++i ) 
+        if( traces[i].started )
+            fprintf( traces[i].f, "call<%s,%d>: ''' + names[i] + '''(''' )
     if( parameters_n[i] == 0 ) :
         gldl_c.write( ");\\n\", file, line );\n" )
     else :

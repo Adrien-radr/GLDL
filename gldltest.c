@@ -40,7 +40,7 @@ int main() {
         
 
         // init gldl
-        noerr = !gldlInit();
+        noerr = gldlInit();
         if( !noerr ) {
             printf( "Error initializing gldl!\n" );
             return -1;
@@ -50,21 +50,24 @@ int main() {
             printf( "GL version 3.3 %ssupported.\n", noerr ? "" : "un" );
         }
 
+        gldlBeginTrace( 1 );
         glClearColor( 1.0, 0.8, 0.f, 1.f );
+        gldlEndTrace( 1 );
 
         int run = 1;
 
         while(run){
+            gldlBeginTrace( 2 );
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             glfwSwapBuffers();
 
             run = !glfwGetKey(GLFW_KEY_ESC) && glfwGetWindowParam(GLFW_OPENED);
+            gldlEndTrace( 2 );
         }
 
     }
 
-    //gldlTerminate();
     glfwTerminate();
 
 	return 0;
