@@ -27,17 +27,8 @@ int main() {
                             8, 8, 8, 8,
                             24, 8, GLFW_WINDOW);
 
-    if(noerr){
+    if( noerr ){
         printf("Window Created\n");
-
-        int nVMode = 0;
-        GLFWvidmode modes[20];
-        nVMode = glfwGetVideoModes(modes, 20);
-        for(int i = 0; i < nVMode; ++i)
-            printf("%dx%d : %d bpp\n", modes[i].Width, modes[i].Height, (  modes[i].RedBits +
-                                                                           modes[i].GreenBits +
-                                                                           modes[i].BlueBits));
-        
 
         // init gldl
         noerr = gldlInit();
@@ -56,6 +47,10 @@ int main() {
 
         int run = 1;
 
+        GLuint buf[4];
+        glGenBuffers( 4, buf );
+        glDeleteBuffers( 4, buf );
+
         while(run){
             gldlBeginTrace( 2 );
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -69,6 +64,7 @@ int main() {
     }
 
     glfwTerminate();
+    gldlTerminate();
 
 	return 0;
 }

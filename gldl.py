@@ -17,7 +17,7 @@ if not os.path.exists( "GL/GL3" ) :
 if not os.path.exists( "GL/GL3/gl3.h" ) :
     print "Downloading gl3.h from opengl.org to GL/GL3..."
     gl3_url = urllib2.urlopen( "http://www.opengl.org/registry/api/gl3.h" )
-    gl3_src = open( "GL/GL3/gl3.h", "w" )
+    gl3_src = open( "GL/GL3/gl3.h", "wb" )
     gl3_src.writelines( gl3_url.readlines() )
     gl3_src.close()
 else :
@@ -71,7 +71,7 @@ sorted_names = sorted( names )
 print "Generating GL/gldl.h header file..."
 
 # Write GLDL header
-gldl_h = open( "GL/gldl.h", "w" )
+gldl_h = open( "GL/gldl.h", "wb" )
 
 gldl_h.write( r'''
 #ifndef __GLDL_H
@@ -92,6 +92,7 @@ extern "C" {
 
 // GLDL API functions
 int gldlInit();
+void gldlTerminate();
 int gldlIsSupported( unsigned int major, unsigned int minor );
 void gldlBeginTrace( unsigned int trace_n );
 void gldlEndTrace( unsigned int trace_n );
@@ -150,7 +151,7 @@ gldl_h.write( r'''
 print "Generating GL/gldl.c source file..."
 
 # Write GLDL src
-gldl_c = open( "GL/gldl.c", "w" )
+gldl_c = open( "GL/gldl.c", "wb" )
 
 gldl_c.write( r'''
 #include "gldl.h"
@@ -246,8 +247,11 @@ void ShowTexture() {
 // ###################################################################
 // API FUNCTIONS
 
-static int gldl_init = 0;                   // Assure that gldl has been init
-static int break_functions[GLDL_FUNC_N];    // Breakpoints storing array
+static int  gldl_init = 0;                  // Assure that gldl has been init
+
+static int  break_functions[GLDL_FUNC_N];   // Breakpoints storing array
+static int  break_next = 0;                 // Break on next function ?
+static char debug_break[10];                // Used to display break cause
 
 // GL function call traces
 // First trace is the init trace (trace until first glClear())
@@ -256,8 +260,25 @@ static int break_functions[GLDL_FUNC_N];    // Breakpoints storing array
 static struct s_ct {
     FILE        *f;
     int         started;
-} traces[TRACE_N];
+} gldl_traces[TRACE_N];
 
+// GL Buffers
+struct gldl_buffer {
+    GLint       id;
+    GLuint      size;
+    GLfloat     *data;
+
+    int         next_free;
+};
+
+static struct {
+    struct gldl_buffer  *arr;
+    unsigned int        size;
+    unsigned int        count;
+    unsigned int        first_free;
+
+    int                 bound_buffer;
+} gldl_buffers;
 
 static struct {
     GLint       major,
@@ -265,9 +286,15 @@ static struct {
 } gl_version;
 
 
+static void InitBufferArray();
+static void DeleteBufferArray();
+static void AddBuffers( GLsizei n, GLuint *ids );
+static void DeleteBuffers( GLsizei n, const GLuint *ids );
+static void PrintBufferData( int id );
+static void PrintBuffers();
 
-static int GetGLVersion();
-static int DebugTest( int func_index );
+static int  GetGLVersion();
+static void DebugTest( int func_index );
 static void DebugFunction();
 static void LoadProcs();
 
@@ -282,9 +309,11 @@ int gldlInit() {
     gldl_init = GetGLVersion();
 
     if( gldl_init ) {
-        memset( traces, 0, TRACE_N * sizeof(struct s_ct) );
-        traces[0].f = fopen( "trace_init.log", "w" );
-        traces[0].started = 1;
+        memset( gldl_traces, 0, TRACE_N * sizeof(struct s_ct) );
+        gldl_traces[0].f = fopen( "trace_init.log", "w" );
+        gldl_traces[0].started = 1;
+
+        InitBufferArray();
 
         memset( break_functions, -1, GLDL_FUNC_N * sizeof(int) );
         DebugFunction();
@@ -292,6 +321,16 @@ int gldlInit() {
     
 
     return gldl_init;
+}
+
+void gldlTerminate() {
+    int i;
+
+    DeleteBufferArray();
+
+    for( i = 0; i < TRACE_N; ++i ) 
+        if( gldl_traces[i].started ) 
+            fclose( gldl_traces[i].f );
 }
 
 int gldlIsSupported( unsigned int major, unsigned int minor ) {
@@ -304,23 +343,179 @@ int gldlIsSupported( unsigned int major, unsigned int minor ) {
 void gldlBeginTrace( unsigned int trace_n ) {
     if( !trace_n || trace_n >= TRACE_N ) return;
 
-    if( !traces[trace_n].f ) {
+    if( !gldl_traces[trace_n].f ) {
         char filename[16];
         sprintf( filename, "trace%d.log", trace_n );
 
-        traces[trace_n].f = fopen( filename, "w" );
+        gldl_traces[trace_n].f = fopen( filename, "w" );
     }
 
-    traces[trace_n].started = 1;
+    gldl_traces[trace_n].started = 1;
 }
 
 void gldlEndTrace( unsigned int trace_n ) {
     if( !trace_n || trace_n >= TRACE_N ) return;
 
-    traces[trace_n].started = 0;
+    gldl_traces[trace_n].started = 0;
 }
 
 // Private functions
+
+// Initialize gldl_buffers
+static void InitBufferArray() {
+    // initialize with 20 elem at first
+    gldl_buffers.size = 20;
+    gldl_buffers.count = 0;
+    gldl_buffers.first_free = 0;
+    gldl_buffers.bound_buffer = -1;
+
+    gldl_buffers.arr = calloc( gldl_buffers.size, sizeof(struct gldl_buffer) );
+    
+    int i;
+    for( i = 0; i < gldl_buffers.size; ++i ) {
+        gldl_buffers.arr[i].id = -1;
+        gldl_buffers.arr[i].size = 0;
+        gldl_buffers.arr[i].data = NULL;
+        gldl_buffers.arr[i].next_free = i+1;
+    }
+    gldl_buffers.arr[gldl_buffers.size-1].next_free = -1;
+}
+
+// Free gldl_buffers
+static void DeleteBufferArray() {
+    int i;
+    for( i = 0; i < gldl_buffers.size; ++i ) 
+        if( gldl_buffers.arr[i].data )
+            free( gldl_buffers.arr[i].data );
+
+    free( gldl_buffers.arr );
+}
+
+static void AddBuffers( GLsizei n, GLuint *ids ) {
+    int i, new_index;
+    int index = gldl_buffers.first_free;
+    int need_realloc = 0;
+
+    // realloc array if full (with 1.7x policy)
+    for( new_index = n-1; new_index >= 0; --new_index ) {
+        if( -1 == index ) {
+            need_realloc = 1;
+            break;
+        }
+
+        index = gldl_buffers.arr[index].next_free;
+    }
+
+    index = gldl_buffers.first_free;
+
+    if( need_realloc ) {
+        gldl_buffers.arr[gldl_buffers.size-1].next_free = gldl_buffers.size;
+
+        gldl_buffers.size *= 1.7;
+        gldl_buffers.arr = realloc( gldl_buffers.arr, sizeof(struct gldl_buffer) * gldl_buffers.size );
+
+        for( i = gldl_buffers.count; i < gldl_buffers.size; ++i ) {
+            gldl_buffers.arr[i].id = -1;
+            gldl_buffers.arr[i].size = 0;
+            gldl_buffers.arr[i].data = NULL;
+            gldl_buffers.arr[i].next_free = i+1;
+        }
+        gldl_buffers.arr[gldl_buffers.size-1].next_free = -1;
+
+        // change first_free only if new_index is far
+        if( new_index == 0 )
+            gldl_buffers.first_free = index = gldl_buffers.count;
+    }
+
+    // add new buffers
+    for( i = 0; i < n; ++i ) {
+        gldl_buffers.arr[index].id = ids[i];
+        gldl_buffers.count++;
+
+        gldl_buffers.first_free = index = gldl_buffers.arr[index].next_free;
+    }
+
+    gldl_buffers.bound_buffer = ids[0];
+}
+
+static void DeleteBuffers( GLsizei n, const GLuint *ids ) {
+    int cpt;
+    int i;
+    int tmp;
+
+    for( cpt = 0; cpt < n; ++cpt ) {
+        for( i = 0; i < gldl_buffers.size; ++i ) {
+            // if nothing more to see, return
+            if( gldl_buffers.arr[i].id == -1 )
+                return;
+
+            if( gldl_buffers.arr[i].id == ids[cpt] ) {
+                // delete buffer memory
+                gldl_buffers.arr[i].id = 0;
+                free( gldl_buffers.arr[i].data );
+                gldl_buffers.arr[i].data = NULL;
+
+                // reorganise array linking
+                tmp = gldl_buffers.first_free;
+                gldl_buffers.first_free = gldl_buffers.arr[i].next_free;
+                gldl_buffers.arr[i].next_free = tmp;
+
+                // unbind this buffer if bound
+                if( gldl_buffers.bound_buffer == ids[cpt] )
+                    gldl_buffers.bound_buffer = -1;
+
+                gldl_buffers.count--;
+
+                break;
+            }
+        }
+    }
+}
+
+static void PrintBufferData( int id ) {
+    int i, j;
+
+    if( id >= 1 && gldl_buffers.count ) {
+        for( i = 0; i < gldl_buffers.size; ++i ) {
+            // if nothing more to see, break
+            if( gldl_buffers.arr[i].id == -1 )
+                break;
+
+            if( gldl_buffers.arr[i].id == id ) {
+                printf( "Buffer %d:\n{ ", id );
+                if( gldl_buffers.arr[i].data ) {
+                    for( j = 0; j < gldl_buffers.arr[i].size - 1; ++j )
+                        printf( "%.2f, ", gldl_buffers.arr[i].data[j] );
+                    printf( "%.2f }\n\n", gldl_buffers.arr[i].data[j+1] );
+                } else
+                    printf( " }\n\n" );
+                return;
+            }
+        }
+    }
+
+    printf( "This buffer does not exist.\n" );
+}
+
+static void PrintBuffers() {
+    int buf_cpt = 0;
+    int i;
+
+    for( i = 0; i < gldl_buffers.size; ++i ) {
+        if( gldl_buffers.arr[i].id == -1 )
+            break;
+
+        if( gldl_buffers.arr[i].id ) {
+            if( !buf_cpt )
+                printf( "List of existing buffers :\n" );
+            printf( "%d\n", gldl_buffers.arr[i].id );
+            buf_cpt++;
+        }
+    }
+
+    if( !buf_cpt )
+        printf( "No GL buffers.\n" );
+}
 
 // Store the used GL version in the gl_version struct
 // Returns 1 if Core Profile loaded correctly
@@ -334,20 +529,32 @@ static int GetGLVersion() {
 }
 
 // Check if a breakpoint is set on the given function
-static int DebugTest( int func_index ) {
-    for( int i = 0; i < GLDL_FUNC_N; ++i ) {
-        if( -1 == break_functions[i] ) 
-            break;
-        if( func_index == break_functions[i] ) 
-            return i;
+static void DebugTest( int func_index ) {
+    int i;
+
+    debug_break[0] = 0;
+
+    if( break_next ) {
+        strcpy( debug_break, "(next)" );
+        break_next = 0;
+        return;
     }
-    return -1;
+
+    for( i = 0; i < GLDL_FUNC_N; ++i ) {
+        if( -1 == break_functions[i] ) 
+            return;
+        if( func_index == break_functions[i] ) {
+            sprintf( debug_break, "%d", i );
+            return;
+        }
+    }
 }
 
 
 // Interactive Debug session when a breakpoint arose or during initialization
 static void DebugFunction() {
     char line[128];
+    static char last_cmd_buf[32] = "", last_param_buf[64] = "";
     char cmd_buf[32], param_buf[64];
     int scan_ret;
     int nomatch = 0;
@@ -360,108 +567,149 @@ static void DebugFunction() {
         scan_ret = sscanf( line, "%s %s", cmd_buf, param_buf );
 
 
-        // nothing on line
-        if( -1 == scan_ret ) 
-            continue;
+        // nothing on line, use last working command
+        if( -1 == scan_ret ) {
+            if( last_cmd_buf[0] ) {
+                scan_ret = 1;
+                strcpy( cmd_buf, last_cmd_buf );
 
-        // command found (and maybe param)
-        else {
-            // continue program execution
-            if( !strcmp( cmd_buf, "c" ) || !strcmp( cmd_buf, "continue" ) )
-                break;
+                if( last_param_buf[0] ) {
+                    scan_ret = 2;
+                    strcpy( param_buf, last_param_buf );
+                } else
+                    param_buf[0] = 0;
+            } else
+                continue;
+        }
 
-            // check for breakpoints listing
-            else if( !strcmp( cmd_buf, "l" ) || !strcmp( cmd_buf, "list" ) ) {
-                int found_one = 0;
-                for( int i = 0; i < GLDL_FUNC_N; ++i ) {
-                    if( -1 == break_functions[i] ) break;
-                    if( -2 == break_functions[i] ) continue;
-                    printf( "Breakpoint %d on function %s()\n", i, gl_functions[break_functions[i]] );
-                    found_one = 1;
-                }
+        // make history
+        strcpy( last_cmd_buf, cmd_buf );
+        strcpy( last_param_buf, param_buf );
 
-                if( !found_one )
-                    printf( "No breakpoints set.\n" );
+        // continue program execution
+        if( !strcmp( cmd_buf, "c" ) || !strcmp( cmd_buf, "continue" ) )
+            break;
+
+        // break on next GL func
+        else if( !strcmp( cmd_buf, "n" ) || !strcmp( cmd_buf, "next" ) ) {
+            break_next = 1;
+            break;
+        }
+
+        // check for breakpoints listing
+        else if( !strcmp( cmd_buf, "l" ) || !strcmp( cmd_buf, "list" ) ) {
+            int found_one = 0;
+            int i;
+            for( i = 0; i < GLDL_FUNC_N; ++i ) {
+                if( -1 == break_functions[i] ) break;
+                if( -2 == break_functions[i] ) continue;
+                printf( "Breakpoint %d on function %s()\n", i, gl_functions[break_functions[i]] );
+                found_one = 1;
             }
 
-            // check for break demand on GL function
-            else if( !strcmp( cmd_buf, "b" ) || !strcmp( cmd_buf, "break" ) ) {
-                // retrieve function name index
-                int index = -1;
+            if( !found_one )
+                printf( "No breakpoints set.\n" );
+        }
 
-                // check for parameter
-                if( scan_ret == 1 ) {
-                    printf( "Break needs one parameter.\n" );
-                    continue;
-                }
+        // check for buffers listing
+        else if( !strcmp( cmd_buf, "bl" ) || !strcmp( cmd_buf, "buflist" ) ) {
+            PrintBuffers();
+        }
 
-                for( int i = 0; i < ''' + str(len(names)) + '''; ++i ) {
-                    int cmp = strcmp( param_buf, gl_functions[i] );
+        // check for break demand on GL function
+        else if( !strcmp( cmd_buf, "b" ) || !strcmp( cmd_buf, "break" ) ) {
+            // retrieve function name index
+            int index = -1;
 
-                    if( !cmp ) {
-                        index = i;
-                        break;
-                    }
-                    else if( cmp < 0 ) {
-                        printf( "%s is not a valid GL function!\\n", param_buf );
-                        break;
-                    }
-                }
-
-                if( index >= 0 )
-                    // insert function name index in next free spot
-                    for( int i = 0; i < GLDL_FUNC_N; ++i )
-                        if( 0 > break_functions[i] ) {
-                            break_functions[i] = index;
-                            printf( "Breakpoint %d, %s()\\n", i, param_buf );
-                            break;
-                        }
+            // check for parameter
+            if( scan_ret == 1 ) {
+                printf( "Break needs one parameter.\n" );
+                continue;
             }
 
-            // check for breakpoints deletion
-            else if( !strcmp( cmd_buf, "d" ) || !strcmp( cmd_buf, "delete" ) ) {
-                // get confirmation
-                char str[4];
-                char c;
+            int i;
+            for( i = 0; i < ''' + str(len(names)) + '''; ++i ) {
+                int cmp = strcmp( param_buf, gl_functions[i] );
 
-                // if param, delete wanted breakpoint
-                if( 2 == scan_ret ) {
-                    int index = atoi( param_buf );
-                    if( index < 0 || index >= GLDL_FUNC_N  || ( !index && strcmp( param_buf, "0" ) ) || -1 == break_functions[index] ) {
-                        printf( "Breakpoint %s does not exist\\n", param_buf );
-                    } else {
-                        break_functions[index] = -2;
-                        printf( "Breakpoint %d deleted\\n", index );
-                    }
-                    continue;
+                if( !cmp ) {
+                    index = i;
+                    break;
                 }
-
-                // no param, ask for global deletion
-                while( 1 ) {
-                    printf( "Delete all breakpoints? (y or n) " );
-                    gets( str );
-                    sscanf( str, "%c", &c );
-
-                    if( 'n' == c )
-                        break;
-                    if( 'y' == c ) {
-                        for( int i = 0; i < GLDL_FUNC_N; ++i ) {
-                            if( -1 == break_functions[i] ) break;
-                            break_functions[i] = -1;
-                        }
-                        break;
-                    }
+                else if( cmp < 0 ) {
+                    printf( "%s is not a valid GL function!\\n", param_buf );
+                    break;
                 }
             }
 
-            // open glfw
-            else if( !strcmp( cmd_buf, "glfw" ) ) {
-                ShowTexture();
+            if( index >= 0 ) {
+                int i;
+                // insert function name index in next free spot
+                for( i = 0; i < GLDL_FUNC_N; ++i )
+                    if( 0 > break_functions[i] ) {
+                        break_functions[i] = index;
+                        printf( "Breakpoint %d, %s()\\n", i, param_buf );
+                        break;
+                    }
+            }
+        }
+
+        // check for breakpoints deletion
+        else if( !strcmp( cmd_buf, "d" ) || !strcmp( cmd_buf, "delete" ) ) {
+            // get confirmation
+            char str[4];
+            char c;
+
+            // if param, delete wanted breakpoint
+            if( 2 == scan_ret ) {
+                int index = atoi( param_buf );
+                if( index < 0 || index >= GLDL_FUNC_N  || ( !index && strcmp( param_buf, "0" ) ) || -1 == break_functions[index] ) {
+                    printf( "Breakpoint %s does not exist\\n", param_buf );
+                } else {
+                    break_functions[index] = -2;
+                    printf( "Breakpoint %d deleted\\n", index );
+                }
+                continue;
             }
 
-            // no match, show help
-            else 
-                nomatch = 1;
+            // no param, ask for global deletion
+            while( 1 ) {
+                printf( "Delete all breakpoints? (y or n) " );
+                gets( str );
+                sscanf( str, "%c", &c );
+
+                if( 'n' == c )
+                    break;
+                if( 'y' == c ) {
+                    int i;
+                    for( i = 0; i < GLDL_FUNC_N; ++i ) {
+                        if( -1 == break_functions[i] ) break;
+                        break_functions[i] = -1;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // print buffer data
+        else if( !strcmp( cmd_buf, "bp" ) || !strcmp( cmd_buf, "bufferprint" ) ) {
+            // check for param
+            if( scan_ret < 2 ) {
+                printf( "Bufferprint needs a parameter (buffer to print).\\n" );
+                continue;
+            }
+
+            int index = atoi( param_buf );
+            PrintBufferData( index );
+        }
+
+        // open glfw
+        else if( !strcmp( cmd_buf, "glfw" ) ) {
+            ShowTexture();
+        }
+
+        // no match, show help
+        else 
+            nomatch = 1;
 
         }
 
@@ -471,8 +719,6 @@ static void DebugFunction() {
             printf( "Invalid command \\"%s\\". Try \\"help\\"\\n", cmd_buf );
             nomatch = 0;
         }
-
-    }
 }
 
 ''')
@@ -497,6 +743,11 @@ gldl_c.write( r'''
 // GLDL Debug Functions
 ''')
 
+# ============================
+#       BUFFER MANAGMENT
+# ============================
+    
+
 # Write all GLDL functions
 for i in range( len(names) ) :
     # get function param names
@@ -519,17 +770,18 @@ for i in range( len(names) ) :
 
     # If glClear, add init_trace ending
     if names[i] == "glClear" :
-        gldl_c.write( r'''    if( traces[0].started ) {
-        traces[0].started = 0;
-        fclose( traces[0].f );
+        gldl_c.write( r'''    if( gldl_traces[0].started ) {
+        gldl_traces[0].started = 0;
+        fclose( gldl_traces[0].f );
     }
 
     ''' )
 
     # Write traces
-    gldl_c.write( r'''    for( int i = 0; i < TRACE_N; ++i ) 
-        if( traces[i].started )
-            fprintf( traces[i].f, "call<%s,%d>: ''' + names[i] + '''(''' )
+    gldl_c.write( r'''    int i;
+    for( i = 0; i < TRACE_N; ++i ) 
+        if( gldl_traces[i].started )
+            fprintf( gldl_traces[i].f, "call<%s,%d>: ''' + names[i] + '''(''' )
     if( parameters_n[i] == 0 ) :
         gldl_c.write( ");\\n\", file, line );\n" )
     else :
@@ -542,23 +794,26 @@ for i in range( len(names) ) :
 
     # Write interactive debug
     gldl_c.write( r'''
-    int breakpoint = DebugTest( ''' + str(sorted_names.index( names[i] )) + ''' );
-    if( breakpoint >= 0 ) {
-        printf( "Breakpoint %d on ''' + names[i] + '''( ''')
+    DebugTest( ''' + str(sorted_names.index( names[i] )) + ''' );
+    if( debug_break[0] ) {
+        printf( "Breakpoint %s on ''' + names[i] + '''( ''')
         
     # print all args and their values
     if parameters_n[i] == 0 :
-        gldl_c.write( ") at %s:%d\\n\", breakpoint, file, line );\n" )
+        gldl_c.write( ") at %s:%d\\n\", debug_break, file, line );\n" )
     else :
         for j in range( parameters_n[i] - 1 ) :
             gldl_c.write( param_names[j] + "=%s, " )
-        gldl_c.write( param_names[-1] + "=%s ) at %s:%d\\n\", breakpoint, " )
+        gldl_c.write( param_names[-1] + "=%s ) at %s:%d\\n\", debug_break, " )
 
         for j in range( parameters_n[i] - 1 ) :
             gldl_c.write( "arg" + str(j) + ", " )
-        gldl_c.write( "arg" + str( parameters_n[i]-1 ) + ", file, line );\n" )
+        gldl_c.write( "arg" + str( parameters_n[i]-1 ) + ", file, line );" )
 
-    gldl_c.write( "\t\tDebugFunction();\n\t}\n\t" )
+    gldl_c.write( r'''
+        DebugFunction();
+    }
+    ''' )
 
    
     # Return the value of GL impl if needed
@@ -569,17 +824,15 @@ for i in range( len(names) ) :
     for j in range( parameters_n[i] - 1 ) :
         gldl_c.write( param_names[j] + ", " )
 
-    gldl_c.write( param_names[parameters_n[i] - 1] + " );\n}\n\n" )
+    gldl_c.write( param_names[parameters_n[i] - 1] + " );\n" )
+    
+    
+    if names[i] == "glGenBuffers" :
+        gldl_c.write( "\tAddBuffers( n, buffers );\n" )
+    elif names[i] == "glDeleteBuffers" :
+        gldl_c.write( "\tDeleteBuffers( n, buffers );\n" )
+
+
+    gldl_c.write( "}\n\n" )
     
 
-
-#void gldlClear( GLbitfield mask, const char * mask_str, const char* file, int line ) {
-
-#    fprintf( trace, "call<%s,%d>: glClear( %s );\n", file, line, mask_str );
-#    fflush( trace );
-#    printf( "call<%s,%d>: glClear( %s )\n", file, line, mask_str );
-
-#    gldlDebugFunc();
-
-#    gldlClear_impl( mask );
-#}

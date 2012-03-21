@@ -1,1 +1,3 @@
-call<gldltest.c,54>: glClearColor( 1.0, 0.8, 0.f, 1.f );
+call<gldltest.c,45>: glClearColor( 1.0, 0.8, 0.f, 1.f );
+call<gldltest.c,51>: glGenBuffers( 4, buf );
+call<gldltest.c,52>: glDeleteBuffers( 4, buf );

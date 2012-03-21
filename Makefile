@@ -1,6 +1,6 @@
 CC = gcc
-LFLAGS = -Wall -std=c99 -lglfw -g
-CFLAGS = -Wall -std=c99 -lglfw -lGL -lX11 -lXrandr -lpthread -ldl -g
+LFLAGS = -Wall -lglfw -g
+CFLAGS = -Wall -lglfw -lGL -lX11 -lXrandr -lpthread -ldl -g
 
 .PHONY: gldl,all,exec,clean
 
