@@ -1,3 +1,6 @@
 call<gldltest.c,45>: glClearColor( 1.0, 0.8, 0.f, 1.f );
-call<gldltest.c,51>: glGenBuffers( 4, buf );
-call<gldltest.c,52>: glDeleteBuffers( 4, buf );
+call<gldltest.c,53>: glGenBuffers( 4, buf );
+call<gldltest.c,54>: glBindBuffer( GL_ARRAY_BUFFER, 1 );
+call<gldltest.c,55>: glBufferData( GL_ARRAY_BUFFER, 16, data, GL_STATIC_DRAW );
+call<gldltest.c,56>: glBufferSubData( GL_ARRAY_BUFFER, 8, 8, data );
+call<gldltest.c,57>: glDeleteBuffers( 4, buf );

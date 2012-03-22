@@ -47,8 +47,13 @@ int main() {
 
         int run = 1;
 
+        float data[] = { 0, 1.5, 0.5, 0.5 };
+
         GLuint buf[4];
         glGenBuffers( 4, buf );
+        glBindBuffer( GL_ARRAY_BUFFER, buf[0] );
+        glBufferData( GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW );
+        glBufferSubData( GL_ARRAY_BUFFER, sizeof(data) / 2, sizeof(data) / 2, data );
         glDeleteBuffers( 4, buf );
 
         while(run){

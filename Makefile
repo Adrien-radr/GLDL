@@ -8,15 +8,17 @@ all:
 	@make gldl
 	@make exec
 
-gldl: 
-	@gcc GL/gldl.c -c -o GL/gldl.o $(LFLAGS)
+gldl: GL/gldl.o
 	@echo "CC	gldl.c"
 	#@ar r libgldl.a GL/gldl.o GL/gldl_funcarray.o
 	#@ranlib libgldl.a
 	#@echo "AR	libgldl.a"
 
+GL/%.o: GL/%.c
+	@$(CC) $(LFLAGS) -c $< -o $@
+
 exec:
-	@gcc gldltest.c GL/gldl.o -o bin/gldltest $(CFLAGS)
+	@$(CC) gldltest.c GL/gldl.o -o bin/gldltest $(CFLAGS)
 	@echo "CC	gldltest.c"
 
 clean:

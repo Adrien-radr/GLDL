@@ -277,7 +277,8 @@ static struct {
     unsigned int        count;
     unsigned int        first_free;
 
-    int                 bound_buffer;
+    int                 bound_array_b;
+    int                 bound_elem_array_b;
 } gldl_buffers;
 
 static struct {
@@ -290,7 +291,9 @@ static void InitBufferArray();
 static void DeleteBufferArray();
 static void AddBuffers( GLsizei n, GLuint *ids );
 static void DeleteBuffers( GLsizei n, const GLuint *ids );
-static void PrintBufferData( int id );
+static void BindBuffer( GLuint id, int elem_array );
+static void FillBuffer( const void* data, GLsizei size, unsigned int offset, int elem_array );
+static void PrintBufferData( int id, unsigned int type_size, unsigned int elem_size );
 static void PrintBuffers();
 
 static int  GetGLVersion();
@@ -367,7 +370,8 @@ static void InitBufferArray() {
     gldl_buffers.size = 20;
     gldl_buffers.count = 0;
     gldl_buffers.first_free = 0;
-    gldl_buffers.bound_buffer = -1;
+    gldl_buffers.bound_array_b = -1;
+    gldl_buffers.bound_elem_array_b = -1;
 
     gldl_buffers.arr = calloc( gldl_buffers.size, sizeof(struct gldl_buffer) );
     
@@ -434,8 +438,6 @@ static void AddBuffers( GLsizei n, GLuint *ids ) {
 
         gldl_buffers.first_free = index = gldl_buffers.arr[index].next_free;
     }
-
-    gldl_buffers.bound_buffer = ids[0];
 }
 
 static void DeleteBuffers( GLsizei n, const GLuint *ids ) {
@@ -454,6 +456,7 @@ static void DeleteBuffers( GLsizei n, const GLuint *ids ) {
                 gldl_buffers.arr[i].id = 0;
                 free( gldl_buffers.arr[i].data );
                 gldl_buffers.arr[i].data = NULL;
+                gldl_buffers.arr[i].size = 0;
 
                 // reorganise array linking
                 tmp = gldl_buffers.first_free;
@@ -461,8 +464,10 @@ static void DeleteBuffers( GLsizei n, const GLuint *ids ) {
                 gldl_buffers.arr[i].next_free = tmp;
 
                 // unbind this buffer if bound
-                if( gldl_buffers.bound_buffer == ids[cpt] )
-                    gldl_buffers.bound_buffer = -1;
+                if( gldl_buffers.bound_array_b == ids[cpt] )
+                    gldl_buffers.bound_array_b = -1;
+                if( gldl_buffers.bound_elem_array_b == ids[cpt] )
+                    gldl_buffers.bound_elem_array_b = -1;
 
                 gldl_buffers.count--;
 
@@ -472,8 +477,72 @@ static void DeleteBuffers( GLsizei n, const GLuint *ids ) {
     }
 }
 
-static void PrintBufferData( int id ) {
-    int i, j;
+// Bind the given Buffer ID. if elem_array is true, bind it to elem_array_b
+static void BindBuffer( GLuint id, int elem_array ) {
+    // search for id in buffer array
+    int i;
+
+    if( 0 == id ) {
+        if( elem_array )
+            gldl_buffers.bound_elem_array_b = 0;
+        else
+            gldl_buffers.bound_array_b = 0;
+
+        return;
+    }
+
+    for( i = 0; i < gldl_buffers.size; ++i ) {
+        if( gldl_buffers.arr[i].id == -1 )
+            break;
+
+        if( gldl_buffers.arr[i].id == id ) {
+            if( elem_array )
+                gldl_buffers.bound_elem_array_b = id;
+            else
+                gldl_buffers.bound_array_b = id;
+        }
+    }
+}
+
+static void FillBuffer( const void* data, GLsizei size, unsigned int offset, int elem_array ) {
+    int i;
+    int index = elem_array ? gldl_buffers.bound_elem_array_b : gldl_buffers.bound_array_b;
+
+    
+    if( index > 0 ) {
+        // search for buffer to fill
+        for( i = 0; i < gldl_buffers.size; ++i ) {
+            if( gldl_buffers.arr[i].id == -1 )
+                break;
+
+            if( gldl_buffers.arr[i].id == index ) {
+                // if offset is given and with size it differ from already allocated space, error (not handled)
+                if( offset && ( size + offset ) > gldl_buffers.arr[i].size ) 
+                    return;
+
+                // alloc data array if not yet
+                if( !gldl_buffers.arr[i].data ) 
+                    gldl_buffers.arr[i].data = calloc( 1, size );
+
+                // realloc if not big enough
+                else if( size > gldl_buffers.arr[i].size )
+                    gldl_buffers.arr[i].data = realloc( gldl_buffers.arr[i].data, size );
+
+                // copy data
+                memcpy( &gldl_buffers.arr[i].data[offset/4], (float*)data, size );
+
+                if( !offset )
+                    gldl_buffers.arr[i].size = size;
+ 
+                break;
+            }
+        }
+    }
+}
+
+static void PrintBufferData( int id, unsigned int type_size, unsigned int elem_size ) {
+    int i, j, k;
+    int array_size;
 
     if( id >= 1 && gldl_buffers.count ) {
         for( i = 0; i < gldl_buffers.size; ++i ) {
@@ -484,11 +553,32 @@ static void PrintBufferData( int id ) {
             if( gldl_buffers.arr[i].id == id ) {
                 printf( "Buffer %d:\n{ ", id );
                 if( gldl_buffers.arr[i].data ) {
-                    for( j = 0; j < gldl_buffers.arr[i].size - 1; ++j )
-                        printf( "%.2f, ", gldl_buffers.arr[i].data[j] );
-                    printf( "%.2f }\n\n", gldl_buffers.arr[i].data[j+1] );
+                    array_size = gldl_buffers.arr[i].size / elem_size;
+
+                    if( 1 == type_size ) {
+                        for( j = 0; j < array_size - 1; ++j )
+                            printf( "%.2f, ", gldl_buffers.arr[i].data[j] );
+                        printf( "%.2f }\n", gldl_buffers.arr[i].data[j] );
+                    } else {
+                        // check if type_size and elem_size works with the size of the array
+                        if( array_size % type_size != 0 || type_size > array_size || ( type_size == array_size && elem_size > 1 ) ) {
+                            printf( "err }\nError : given elem_size and type_size are not compatible with buffer size.\n" );
+                            return;
+                        }
+
+                        for( j = 0; j < array_size - type_size; j += type_size ) {
+                            printf( " { " );
+                            for( k = 0; k < type_size - 1; ++k )
+                                printf( "%.2f, ", gldl_buffers.arr[i].data[j+k] );
+                            printf( "%.2f }, ", gldl_buffers.arr[i].data[j+k] );
+                        }
+                        printf( " { " );
+                        for( k = 0; k < type_size - 1; ++k )
+                            printf( "%.2f, ", gldl_buffers.arr[i].data[j+k] );
+                        printf( "%.2f } }\n", gldl_buffers.arr[i].data[j+k] );
+                    }
                 } else
-                    printf( " }\n\n" );
+                    printf( " }\n" );
                 return;
             }
         }
@@ -554,50 +644,53 @@ static void DebugTest( int func_index ) {
 // Interactive Debug session when a breakpoint arose or during initialization
 static void DebugFunction() {
     char line[128];
-    static char last_cmd_buf[32] = "", last_param_buf[64] = "";
-    char cmd_buf[32], param_buf[64];
+    static char last_cmd[32] = "", last_params[32][3] = { "", "", "" };//last_param[32] = "", last_param2[32] = "";
+    char cmd[32] = "", params[32][3] = { "", "", "" }; // = "", param2[32] = "";
     int scan_ret;
     int nomatch = 0;
+    int i;
 
     while( 1 ) {
         printf( "> " );
     
-        // get line from user and split it in 'cmd params'
+        // get line from user and split it in 'cmd params[0] params[1] params[2]'
         gets( line );
-        scan_ret = sscanf( line, "%s %s", cmd_buf, param_buf );
+        scan_ret = sscanf( line, "%s %s %s %s", cmd, params[0], params[1], params[2] );
 
 
         // nothing on line, use last working command
         if( -1 == scan_ret ) {
-            if( last_cmd_buf[0] ) {
+            if( last_cmd[0] ) {
                 scan_ret = 1;
-                strcpy( cmd_buf, last_cmd_buf );
+                strcpy( cmd, last_cmd );
 
-                if( last_param_buf[0] ) {
-                    scan_ret = 2;
-                    strcpy( param_buf, last_param_buf );
-                } else
-                    param_buf[0] = 0;
+                for( i = 0; i < 3; ++i ) 
+                    if( last_params[i][0] ) {
+                        scan_ret++;
+                        strcpy( params[i], last_params[i] );
+                    } else
+                        params[i][0] = 0;
             } else
                 continue;
         }
 
         // make history
-        strcpy( last_cmd_buf, cmd_buf );
-        strcpy( last_param_buf, param_buf );
+        strcpy( last_cmd, cmd );
+        for( i = 0; i < 3; ++i )
+            strcpy( last_params[i], params[i] );
 
         // continue program execution
-        if( !strcmp( cmd_buf, "c" ) || !strcmp( cmd_buf, "continue" ) )
+        if( !strcmp( cmd, "c" ) || !strcmp( cmd, "continue" ) )
             break;
 
         // break on next GL func
-        else if( !strcmp( cmd_buf, "n" ) || !strcmp( cmd_buf, "next" ) ) {
+        else if( !strcmp( cmd, "n" ) || !strcmp( cmd, "next" ) ) {
             break_next = 1;
             break;
         }
 
         // check for breakpoints listing
-        else if( !strcmp( cmd_buf, "l" ) || !strcmp( cmd_buf, "list" ) ) {
+        else if( !strcmp( cmd, "l" ) || !strcmp( cmd, "list" ) ) {
             int found_one = 0;
             int i;
             for( i = 0; i < GLDL_FUNC_N; ++i ) {
@@ -612,31 +705,31 @@ static void DebugFunction() {
         }
 
         // check for buffers listing
-        else if( !strcmp( cmd_buf, "bl" ) || !strcmp( cmd_buf, "buflist" ) ) {
+        else if( !strcmp( cmd, "bl" ) || !strcmp( cmd, "buflist" ) ) {
             PrintBuffers();
         }
 
         // check for break demand on GL function
-        else if( !strcmp( cmd_buf, "b" ) || !strcmp( cmd_buf, "break" ) ) {
+        else if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
             // retrieve function name index
             int index = -1;
 
             // check for parameter
-            if( scan_ret == 1 ) {
-                printf( "Break needs one parameter.\n" );
+            if( scan_ret != 2 ) {
+                printf( "Break usage : [b]reak function_name.\n" );
                 continue;
             }
 
             int i;
             for( i = 0; i < ''' + str(len(names)) + '''; ++i ) {
-                int cmp = strcmp( param_buf, gl_functions[i] );
+                int cmp = strcmp( params[0], gl_functions[i] );
 
                 if( !cmp ) {
                     index = i;
                     break;
                 }
                 else if( cmp < 0 ) {
-                    printf( "%s is not a valid GL function!\\n", param_buf );
+                    printf( "%s is not a valid GL function!\\n", params[0] );
                     break;
                 }
             }
@@ -647,63 +740,78 @@ static void DebugFunction() {
                 for( i = 0; i < GLDL_FUNC_N; ++i )
                     if( 0 > break_functions[i] ) {
                         break_functions[i] = index;
-                        printf( "Breakpoint %d, %s()\\n", i, param_buf );
+                        printf( "Breakpoint %d, %s()\\n", i, params[0] );
                         break;
                     }
             }
         }
 
         // check for breakpoints deletion
-        else if( !strcmp( cmd_buf, "d" ) || !strcmp( cmd_buf, "delete" ) ) {
+        else if( !strcmp( cmd, "d" ) || !strcmp( cmd, "delete" ) ) {
             // get confirmation
             char str[4];
             char c;
 
-            // if param, delete wanted breakpoint
+            // if one param, delete wanted breakpoint
             if( 2 == scan_ret ) {
-                int index = atoi( param_buf );
-                if( index < 0 || index >= GLDL_FUNC_N  || ( !index && strcmp( param_buf, "0" ) ) || -1 == break_functions[index] ) {
-                    printf( "Breakpoint %s does not exist\\n", param_buf );
+                int index = atoi( params[0] );
+                if( index < 0 || index >= GLDL_FUNC_N  || ( !index && strcmp( params[0], "0" ) ) || -1 == break_functions[index] ) {
+                    printf( "Breakpoint %s does not exist\\n", params[0] );
                 } else {
                     break_functions[index] = -2;
                     printf( "Breakpoint %d deleted\\n", index );
                 }
                 continue;
             }
+            
+            else if( 1 == scan_ret ) {
+                // no param, ask for global deletion
+                while( 1 ) {
+                    printf( "Delete all breakpoints? (y or n) " );
+                    gets( str );
+                    sscanf( str, "%c", &c );
 
-            // no param, ask for global deletion
-            while( 1 ) {
-                printf( "Delete all breakpoints? (y or n) " );
-                gets( str );
-                sscanf( str, "%c", &c );
-
-                if( 'n' == c )
-                    break;
-                if( 'y' == c ) {
-                    int i;
-                    for( i = 0; i < GLDL_FUNC_N; ++i ) {
-                        if( -1 == break_functions[i] ) break;
-                        break_functions[i] = -1;
+                    if( 'n' == c )
+                        break;
+                    if( 'y' == c ) {
+                        int i;
+                        for( i = 0; i < GLDL_FUNC_N; ++i ) {
+                            if( -1 == break_functions[i] ) break;
+                            break_functions[i] = -1;
+                        }
+                        break;
                     }
-                    break;
                 }
+                continue;
+            } else {
+                printf( "Delete usage : [d]elete [breakpoint_id].\\n" );
             }
         }
 
         // print buffer data
-        else if( !strcmp( cmd_buf, "bp" ) || !strcmp( cmd_buf, "bufferprint" ) ) {
+        else if( !strcmp( cmd, "bp" ) || !strcmp( cmd, "bufferprint" ) ) {
             // check for param
             if( scan_ret < 2 ) {
-                printf( "Bufferprint needs a parameter (buffer to print).\\n" );
+                printf( "Bufferprint usage : [b]uffer[p]rint buffer_id [type_size [elem_size]].\\n" );
                 continue;
             }
 
-            int index = atoi( param_buf );
-            PrintBufferData( index );
+            int index = atoi( params[0] );
+            int elem_size = 4;
+            int type_size = 1;
+
+            if( scan_ret >= 3 ) {
+                type_size = atoi( params[1] );
+                
+                if( scan_ret > 3 )
+                    elem_size = atoi( params[2] );
+            }
+
+            PrintBufferData( index, type_size, elem_size );
         }
 
         // open glfw
-        else if( !strcmp( cmd_buf, "glfw" ) ) {
+        else if( !strcmp( cmd, "glfw" ) ) {
             ShowTexture();
         }
 
@@ -711,14 +819,13 @@ static void DebugFunction() {
         else 
             nomatch = 1;
 
-        }
-
         
         // show error if invalid command
         if( nomatch ) {
-            printf( "Invalid command \\"%s\\". Try \\"help\\"\\n", cmd_buf );
+            printf( "Invalid command \\"%s\\". Try \\"help\\"\\n", cmd );
             nomatch = 0;
         }
+    }
 }
 
 ''')
@@ -743,10 +850,11 @@ gldl_c.write( r'''
 // GLDL Debug Functions
 ''')
 
-# ============================
-#       BUFFER MANAGMENT
-# ============================
-    
+def IsNumericParam( param ) :
+    return param == "GLboolean" or param == "GLbyte" or param == "GLshort" or param == "GLint" or param == "GLsizei" or param == "GLubyte" or param == "GLushort" or param == "GLuint" or param == "GLhalf"
+
+def IsNumericPtr( param ) :
+    return param == "GLsizeiptr" or param == "GLintptr"
 
 # Write all GLDL functions
 for i in range( len(names) ) :
@@ -757,7 +865,22 @@ for i in range( len(names) ) :
             param_names[j] = param_names[j].split()[-1]
             param_names[j] = param_names[j].replace( "*", "" )
 
-
+    # get function param types
+    param_types = parameters[i].split( ", " )
+    types = []
+    for j in range( len(param_types) ) :
+        spl = param_types[j].split( " " )
+        if len(spl[0]) > 0 :
+            if spl[-1][0] == "*" :
+                spl[-2] = spl[-2] + "*"
+            type_name = spl[0]
+            for type_n in spl[1:-1] :
+                type_name = type_name + " " + type_n
+            types.append( type_name )
+        else :
+            types.append( "" )
+        
+    
 
     # Write signature
     if( parameters_n[i] == 0 ) :
@@ -777,6 +900,11 @@ for i in range( len(names) ) :
 
     ''' )
 
+
+    # printf-like formats for function params
+    formats = []
+    values = []
+
     # Write traces
     gldl_c.write( r'''    int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -785,12 +913,31 @@ for i in range( len(names) ) :
     if( parameters_n[i] == 0 ) :
         gldl_c.write( ");\\n\", file, line );\n" )
     else :
+        # get format to print params
+        for j in range( parameters_n[i] ) :
+            if IsNumericParam( types[j] ) : 
+                formats.append( "d" )
+                values.append( param_names[j] )
+            elif IsNumericPtr( types[j] ) :
+                formats.append( "d" )
+                values.append( "(int)" + param_names[j] )
+            else :
+                formats.append( "s" )
+                values.append( "arg" + str(j) )
+        print names[i]
+        print types
+        print formats
+        print values
+
+        # print formats
         for j in range( parameters_n[i] - 1 ) :
-            gldl_c.write( " %s," )
-        gldl_c.write( " %s );\\n\", file, line, " )
+            gldl_c.write( " %" + formats[j] + "," )
+        gldl_c.write( " %" + formats[-1] + " );\\n\", file, line, " )
+
+        # print values
         for j in range( parameters_n[i] - 1 ) :
-            gldl_c.write( "arg" + str(j) + ", " )
-        gldl_c.write( " arg" + str(parameters_n[i] - 1) + " );\n" )
+            gldl_c.write( values[j] + ", " )
+        gldl_c.write( " " + values[-1] + " );\n" )
 
     # Write interactive debug
     gldl_c.write( r'''
@@ -802,13 +949,16 @@ for i in range( len(names) ) :
     if parameters_n[i] == 0 :
         gldl_c.write( ") at %s:%d\\n\", debug_break, file, line );\n" )
     else :
+        # print formats
         for j in range( parameters_n[i] - 1 ) :
-            gldl_c.write( param_names[j] + "=%s, " )
-        gldl_c.write( param_names[-1] + "=%s ) at %s:%d\\n\", debug_break, " )
+            gldl_c.write( param_names[j] + "=%" + formats[j] + ", " )
+        gldl_c.write( param_names[-1] + "=%" + formats[-1] + " ) at %s:%d\\n\", debug_break, " )
 
+        # print values
         for j in range( parameters_n[i] - 1 ) :
-            gldl_c.write( "arg" + str(j) + ", " )
-        gldl_c.write( "arg" + str( parameters_n[i]-1 ) + ", file, line );" )
+            gldl_c.write( values[j] + ", ")
+        gldl_c.write( values[-1] + ", file, line );" )
+
 
     gldl_c.write( r'''
         DebugFunction();
@@ -827,10 +977,17 @@ for i in range( len(names) ) :
     gldl_c.write( param_names[parameters_n[i] - 1] + " );\n" )
     
     
+    # Handle Buffer functions
     if names[i] == "glGenBuffers" :
         gldl_c.write( "\tAddBuffers( n, buffers );\n" )
     elif names[i] == "glDeleteBuffers" :
         gldl_c.write( "\tDeleteBuffers( n, buffers );\n" )
+    elif names[i] == "glBindBuffer" :
+        gldl_c.write( "\tBindBuffer( buffer, target == GL_ARRAY_BUFFER ? 0 : 1 );\n" )
+    elif names[i] == "glBufferData" :
+        gldl_c.write( "\tFillBuffer( data, size, 0, target == GL_ARRAY_BUFFER ? 0 : 1 );\n" )
+    elif names[i] == "glBufferSubData" :
+        gldl_c.write( "\tFillBuffer( data, size, offset, target == GL_ARRAY_BUFFER ? 0 : 1 );\n" )
 
 
     gldl_c.write( "}\n\n" )
