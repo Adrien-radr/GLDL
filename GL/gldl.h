@@ -17,7 +17,6 @@ extern "C" {
 
 // GLDL API functions
 int gldlInit();
-void gldlTerminate();
 int gldlIsSupported( unsigned int major, unsigned int minor );
 void gldlBeginTrace( unsigned int trace_n );
 void gldlEndTrace( unsigned int trace_n );

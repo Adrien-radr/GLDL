@@ -56,7 +56,29 @@ int main() {
         glBufferSubData( GL_ARRAY_BUFFER, sizeof(data) / 2, sizeof(data) / 2, data );
         glDeleteBuffers( 4, buf );
 
-        const char *s_src = "Hey\nwhatis up bitches\n}";
+        const char *s_src = "\
+        #version 150\n\
+        #extension GL_ARB_separate_shader_objects : enable\n\
+        \n\
+        layout(location = 0) in vec2 inPosition;\n\
+        layout(location = 1) in vec2 inTexcoord;\n\
+        \n\
+        uniform mat3 ModelMatrix;\n\
+        uniform mat3 ProjectionMatrix;\n\
+        uniform int  Depth;\n\
+        \n\
+        out vec2 texCoords;\n\
+        \n\
+        void main() {\n\
+            texCoords = inTexcoord;\n\
+        \n\
+            vec4 oPosition = vec4( ProjectionMatrix * ModelMatrix * vec3( inPosition, 1.f ), 1.f );\n\
+            oPosition.z = Depth/10.f;\n\
+        \n\
+            gl_Position = oPosition;\n\
+        }\n";
+
+
 
         int p = glCreateProgram();
 
@@ -85,7 +107,6 @@ int main() {
     }
 
     glfwTerminate();
-    gldlTerminate();
 
 	return 0;
 }

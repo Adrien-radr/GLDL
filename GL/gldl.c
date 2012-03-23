@@ -1327,8 +1327,11 @@ int gldlInit() {
         gldl_traces[0].f = fopen( "trace_init.log", "w" );
         gldl_traces[0].started = 1;
 
-        InitBufferArray();
-        InitShaderArray();
+        //InitBufferArray();
+        //InitShaderArray();
+        gldl_buffers.size = 0;
+        gldl_programs.size = 0;
+        gldl_shaders.size = 0;
 
         memset( break_functions, -1, GLDL_FUNC_N * sizeof(int) );
         DebugFunction();
@@ -1336,17 +1339,6 @@ int gldlInit() {
     
 
     return gldl_init;
-}
-
-void gldlTerminate() {
-    int i;
-
-    DeleteShaderArray();
-    DeleteBufferArray();
-
-    for( i = 0; i < TRACE_N; ++i ) 
-        if( gldl_traces[i].started ) 
-            fclose( gldl_traces[i].f );
 }
 
 int gldlIsSupported( unsigned int major, unsigned int minor ) {
@@ -1405,12 +1397,18 @@ static void DeleteBufferArray() {
         free( gldl_buffers.arr[i].data );
 
     free( gldl_buffers.arr );
+
+    gldl_buffers.size = 0;
 }
 
 static void AddBuffers( GLsizei n, GLuint *ids ) {
     int i, new_index;
     int index = gldl_buffers.first_free;
     int need_realloc = 0;
+
+    // init arrays if not yet done
+    if( !gldl_buffers.size ) 
+        InitBufferArray();
 
     // realloc array if full (with 1.7x policy)
     for( new_index = n-1; new_index >= 0; --new_index ) {
@@ -1487,6 +1485,10 @@ static void DeleteBuffers( GLsizei n, const GLuint *ids ) {
             }
         }
     }
+
+    // If no more buffers, destroy array
+    if( !gldl_buffers.count )
+        DeleteBufferArray();
 }
 
 // Bind the given Buffer ID. if elem_array is true, bind it to elem_array_b
@@ -1657,11 +1659,18 @@ static void DeleteShaderArray() {
 
     free( gldl_shaders.arr );
     free( gldl_programs.arr );
+
+    gldl_shaders.size = 0;
+    gldl_programs.size = 0;
 }
 
 static void AddShader( GLuint id, GLenum type ) {
     int i;
     int index = gldl_shaders.first_free;
+
+    // init shader/program arrays if not done yet
+    if( !gldl_shaders.size )
+        InitShaderArray();
 
     if( -1 == index ) {
         gldl_shaders.arr[gldl_shaders.size-1].next_free = gldl_shaders.size;
@@ -1743,6 +1752,10 @@ static void AddProgram( GLuint id ) {
     int i;
     int index = gldl_programs.first_free;
 
+    // init shader/program arrays if not done yet
+    if( !gldl_programs.size )
+        InitShaderArray();
+
     if( -1 == index ) {
         gldl_programs.arr[gldl_programs.size-1].next_free = gldl_programs.size;
 
@@ -1793,6 +1806,10 @@ static void DeleteProgram( GLuint id ) {
             break;
         }
     }
+
+    // if no more programs, delete array
+    if( !gldl_programs.count )
+        DeleteShaderArray();
 }
 
 static void AttachShader( GLuint prog_id, GLuint shader_id ) {
@@ -1944,7 +1961,7 @@ static void PrintShader( int id ) {
             if( !gldl_shaders.arr[i].src )
                 printf( "This shader has no source.\n" );
             else
-                printf( "%s\n", gldl_shaders.arr[i].src );
+                printf( "\n%s\n", gldl_shaders.arr[i].src );
             return;
         }
     }
