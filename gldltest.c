@@ -56,6 +56,22 @@ int main() {
         glBufferSubData( GL_ARRAY_BUFFER, sizeof(data) / 2, sizeof(data) / 2, data );
         glDeleteBuffers( 4, buf );
 
+        const char *s_src = "Hey\nwhatis up bitches\n}";
+
+        int p = glCreateProgram();
+
+        int s = glCreateShader( GL_VERTEX_SHADER );
+        glShaderSource( s, 1, &s_src, NULL );
+
+        glAttachShader( p, s );
+
+        glUseProgram( p );
+
+        glUseProgram( 0 );
+
+        glDeleteShader( s );
+        glDeleteProgram( p );
+
         while(run){
             gldlBeginTrace( 2 );
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

@@ -1234,20 +1234,78 @@ static struct {
     int                 bound_elem_array_b;
 } gldl_buffers;
 
+// GL shader
+struct gldl_shader {
+    GLuint      id;         // Shader GL id
+    GLenum      type;       // GL_{VERTEX,FRAGMENT}_SHADER
+
+    char        *src;       // Shader source
+    GLuint      size;       // Shader source size
+
+    int         next_free;
+};
+
+// GL program
+struct gldl_program {
+    GLuint      id;         // Program GL id
+    GLuint      vs, fs;     // Program linked vertex and fragment shaders ids
+
+    int         next_free;
+};
+
+static struct {
+    struct gldl_shader      *arr;
+    unsigned int            size;
+    unsigned int            count;
+    unsigned int            first_free;
+} gldl_shaders;
+
+static struct {
+    struct gldl_program     *arr;
+    unsigned int            size;
+    unsigned int            count;
+    unsigned int            first_free;
+
+    unsigned int            bound_program;
+} gldl_programs;
+
+
 static struct {
     GLint       major,
                 minor;
 } gl_version;
 
 
+// GLDL Buffer functions
 static void InitBufferArray();
 static void DeleteBufferArray();
 static void AddBuffers( GLsizei n, GLuint *ids );
 static void DeleteBuffers( GLsizei n, const GLuint *ids );
 static void BindBuffer( GLuint id, int elem_array );
 static void FillBuffer( const void* data, GLsizei size, unsigned int offset, int elem_array );
-static void PrintBufferData( int id, unsigned int type_size, unsigned int elem_size );
-static void PrintBuffers();
+
+static void ListBuffers();
+static void PrintBuffer( int id, unsigned int type_size, unsigned int elem_size );
+
+// GLDL Program/Shader functions
+static void InitShaderArray();
+static void DeleteShaderArray();
+static void AddShader( GLuint id, GLenum type );
+static void DeleteShader( GLuint id );
+static void SetShaderSource( GLuint id, const char *src );
+static void AddProgram( GLuint id );
+static void DeleteProgram( GLuint id );
+static void AttachShader( GLuint prog_id, GLuint shader_id );
+static void DetachShader( GLuint prog_id, GLuint shader_id );
+static void BindProgram( GLuint id );
+
+static void ListPrograms();
+static void PrintProgram( int id );
+static void ListShaders();
+static void PrintShader( int id );
+
+
+
 
 static int  GetGLVersion();
 static void DebugTest( int func_index );
@@ -1270,6 +1328,7 @@ int gldlInit() {
         gldl_traces[0].started = 1;
 
         InitBufferArray();
+        InitShaderArray();
 
         memset( break_functions, -1, GLDL_FUNC_N * sizeof(int) );
         DebugFunction();
@@ -1282,6 +1341,7 @@ int gldlInit() {
 void gldlTerminate() {
     int i;
 
+    DeleteShaderArray();
     DeleteBufferArray();
 
     for( i = 0; i < TRACE_N; ++i ) 
@@ -1342,8 +1402,7 @@ static void InitBufferArray() {
 static void DeleteBufferArray() {
     int i;
     for( i = 0; i < gldl_buffers.size; ++i ) 
-        if( gldl_buffers.arr[i].data )
-            free( gldl_buffers.arr[i].data );
+        free( gldl_buffers.arr[i].data );
 
     free( gldl_buffers.arr );
 }
@@ -1493,7 +1552,7 @@ static void FillBuffer( const void* data, GLsizei size, unsigned int offset, int
     }
 }
 
-static void PrintBufferData( int id, unsigned int type_size, unsigned int elem_size ) {
+static void PrintBuffer( int id, unsigned int type_size, unsigned int elem_size ) {
     int i, j, k;
     int array_size;
 
@@ -1540,7 +1599,7 @@ static void PrintBufferData( int id, unsigned int type_size, unsigned int elem_s
     printf( "This buffer does not exist.\n" );
 }
 
-static void PrintBuffers() {
+static void ListBuffers() {
     int buf_cpt = 0;
     int i;
 
@@ -1559,6 +1618,340 @@ static void PrintBuffers() {
     if( !buf_cpt )
         printf( "No GL buffers.\n" );
 }
+
+static void InitShaderArray() {
+    int i;
+
+    // init shaders
+    gldl_shaders.size = 20;
+    gldl_shaders.count = 0;
+    gldl_shaders.first_free = 0;
+
+    gldl_shaders.arr = calloc( gldl_shaders.size, sizeof(struct gldl_shader) );
+
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        gldl_shaders.arr[i].id = -1;
+        gldl_shaders.arr[i].next_free = i+1;
+    }
+    gldl_shaders.arr[i-1].next_free = -1;
+
+    // init programs
+    gldl_programs.size = 20;
+    gldl_programs.count = 0;
+    gldl_programs.first_free = 0;
+
+    gldl_programs.arr = calloc( gldl_programs.size, sizeof(struct gldl_program) );
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        gldl_programs.arr[i].id = -1;
+        gldl_programs.arr[i].next_free = i+1;
+    }
+    gldl_programs.arr[i-1].next_free = -1;
+}
+
+static void DeleteShaderArray() {
+    int i;
+
+    for( i = 0; i < gldl_shaders.size; ++i ) 
+        free( gldl_shaders.arr[i].src );
+
+    free( gldl_shaders.arr );
+    free( gldl_programs.arr );
+}
+
+static void AddShader( GLuint id, GLenum type ) {
+    int i;
+    int index = gldl_shaders.first_free;
+
+    if( -1 == index ) {
+        gldl_shaders.arr[gldl_shaders.size-1].next_free = gldl_shaders.size;
+
+        gldl_shaders.size *= 1.7;
+        gldl_shaders.arr = realloc( gldl_shaders.arr, sizeof(struct gldl_shader) * gldl_shaders.size );
+
+        for( i = gldl_shaders.count; i < gldl_shaders.size; ++i ) {
+            gldl_shaders.arr[i].id = -1;
+            gldl_shaders.arr[i].size = 0;
+            gldl_shaders.arr[i].src = NULL;
+            gldl_shaders.arr[i].next_free = i+1;
+        }
+        gldl_shaders.arr[i-1].next_free = -1;
+
+        gldl_shaders.first_free = index = gldl_shaders.count;
+    }
+
+    // add new shader
+    gldl_shaders.arr[index].id = id;
+    gldl_shaders.arr[index].type = type;
+    gldl_shaders.count++;
+
+    gldl_shaders.first_free = index = gldl_shaders.arr[index].next_free;
+}
+
+static void SetShaderSource( GLuint id, const char *src ) {
+    int i;
+    int len = strlen( src );
+
+    // search for shader in array
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            return;
+
+        if( gldl_shaders.arr[i].id == id ) {
+
+            // if already something, realloc
+            if( gldl_shaders.arr[i].src ) 
+                gldl_shaders.arr[i].src = realloc( gldl_shaders.arr[i].src, len );
+
+            // else, alloc
+            else
+                gldl_shaders.arr[i].src = calloc( 1, len );
+
+            strncpy( gldl_shaders.arr[i].src, src, len );
+            gldl_shaders.arr[i].size = len;
+        }
+    }
+}
+
+static void DeleteShader( GLuint id ) {
+    int i, tmp;
+
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        // if nothing more to see, return
+        if( gldl_shaders.arr[i].id == -1 )
+            return;
+
+        if( gldl_shaders.arr[i].id == id ) {
+            gldl_shaders.arr[i].id = 0;
+            free( gldl_shaders.arr[i].src );
+            gldl_shaders.arr[i].src = NULL;
+            gldl_shaders.arr[i].size = 0;
+
+            // reorganise array linking
+            tmp = gldl_shaders.first_free;
+            gldl_shaders.first_free = gldl_shaders.arr[i].next_free;
+            gldl_shaders.arr[i].next_free = tmp;
+
+            gldl_shaders.count--;
+
+            break;
+        }
+    }
+}
+
+static void AddProgram( GLuint id ) {
+    int i;
+    int index = gldl_programs.first_free;
+
+    if( -1 == index ) {
+        gldl_programs.arr[gldl_programs.size-1].next_free = gldl_programs.size;
+
+        gldl_programs.size *= 1.7;
+        gldl_programs.arr = realloc( gldl_programs.arr, sizeof(struct gldl_program) * gldl_programs.size );
+
+        for( i = gldl_programs.count; i < gldl_programs.size; ++i ) {
+            gldl_programs.arr[i].id = -1;
+            gldl_programs.arr[i].next_free = i+1;
+        }
+        gldl_programs.arr[i-1].next_free = -1;
+
+        gldl_programs.first_free = index = gldl_programs.count;
+    }
+
+    // add new program
+    gldl_programs.arr[index].id = id;
+    gldl_programs.count++;
+
+    gldl_programs.first_free = index = gldl_programs.arr[index].next_free;
+
+}
+
+static void DeleteProgram( GLuint id ) {
+    int i, tmp;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        // if nothing more to see, return
+        if( gldl_programs.arr[i].id == -1 )
+            return;
+
+        if( gldl_programs.arr[i].id == id ) {
+            gldl_programs.arr[i].id = 0;
+            gldl_programs.arr[i].vs = 0;
+            gldl_programs.arr[i].fs = 0;
+
+            // reorganise array linking
+            tmp = gldl_programs.first_free;
+            gldl_programs.first_free = gldl_programs.arr[i].next_free;
+            gldl_programs.arr[i].next_free = tmp;
+
+            // unbind this program if bound
+            if( gldl_programs.bound_program == id )
+                gldl_programs.bound_program = -1;
+
+            gldl_programs.count--;
+
+            break;
+        }
+    }
+}
+
+static void AttachShader( GLuint prog_id, GLuint shader_id ) {
+    int i;
+    int prog = -1;
+
+    // search program index
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            return;
+
+        if( gldl_programs.arr[i].id == prog_id ) {
+            prog = i;
+            break;
+        }
+    }
+
+    if( prog == -1 ) return;
+
+    // search shader
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            return;
+
+        if( gldl_shaders.arr[i].id == shader_id ) {
+            if( gldl_shaders.arr[i].type == GL_VERTEX_SHADER )
+                gldl_programs.arr[prog].vs = shader_id;
+            else if( gldl_shaders.arr[i].type == GL_FRAGMENT_SHADER )
+                gldl_programs.arr[prog].fs = shader_id;
+
+            break;
+        }
+    }
+}
+
+static void DetachShader( GLuint prog_id, GLuint shader_id ) {
+    int i;
+    int type = -1;
+
+    // search shader to detach
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            break;
+
+        if( gldl_shaders.arr[i].id == shader_id ) {
+            type = gldl_shaders.arr[i].type;
+            break;
+        }
+
+    }
+
+    if( type == -1 )
+        return;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            return;
+
+        if( gldl_programs.arr[i].id == prog_id ) {
+            if( type == GL_VERTEX_SHADER )
+                gldl_programs.arr[i].vs = 0;
+            else if( type == GL_FRAGMENT_SHADER )
+                gldl_programs.arr[i].fs = 0;
+            break;
+        }
+    }
+}
+
+static void BindProgram( GLuint id ) {
+    int i;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            return;
+
+        if( gldl_programs.arr[i].id == id ) {
+            gldl_programs.bound_program = id;
+            break;
+        }
+    }
+}
+
+static void ListPrograms() {
+    int i;
+    int got_one = 0;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            break;
+
+        if( gldl_programs.arr[i].id > 0 ) {
+            if( !got_one ) {
+                got_one = 1;
+                printf( "Shader Programs List :\n" );
+            }
+            printf( "%d\n", gldl_programs.arr[i].id );
+        }
+    }
+
+    if( !got_one ) 
+        printf( "No shader programs.\n" );
+}
+
+static void PrintProgram( int id ) {
+    int i;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            break;
+
+        if( gldl_programs.arr[i].id == id ) {
+            printf( "Vertex Shader : %d\nFragment Shader : %d\n", gldl_programs.arr[i].vs, gldl_programs.arr[i].fs );
+            return;
+        }
+    }
+
+    printf( "This shader program does not exist.\n" );
+}
+
+static void ListShaders() {
+    int i;
+    int got_one = 0;
+
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            break;
+
+        if( gldl_shaders.arr[i].id > 0 ) {
+            if( !got_one ) {
+                got_one = 1;
+                printf( "Shaders List :\n" );
+            }
+            printf( "%d\n",  gldl_shaders.arr[i].id );
+        }
+    }
+
+    if( !got_one ) 
+        printf( "No shaders.\n" );
+}
+
+static void PrintShader( int id ) {
+    int i;
+
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            break;
+
+        if( gldl_shaders.arr[i].id == id ) {
+            if( !gldl_shaders.arr[i].src )
+                printf( "This shader has no source.\n" );
+            else
+                printf( "%s\n", gldl_shaders.arr[i].src );
+            return;
+        }
+    }
+
+    printf( "This shader does not exist.\n" );
+}
+
 
 // Store the used GL version in the gl_version struct
 // Returns 1 if Core Profile loaded correctly
@@ -1658,9 +2051,16 @@ static void DebugFunction() {
         }
 
         // check for buffers listing
-        else if( !strcmp( cmd, "bl" ) || !strcmp( cmd, "buflist" ) ) {
-            PrintBuffers();
-        }
+        else if( !strcmp( cmd, "lb" ) || !strcmp( cmd, "listbuffer" ) ) 
+            ListBuffers();
+
+        // check for shaders listing
+        else if( !strcmp( cmd, "ls" ) || !strcmp( cmd, "listshaders" ) ) 
+            ListShaders();
+
+        // check for programs listing
+        else if( !strcmp( cmd, "lp" ) || !strcmp( cmd, "listprograms" ) ) 
+            ListPrograms();
 
         // check for break demand on GL function
         else if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
@@ -1742,10 +2142,10 @@ static void DebugFunction() {
         }
 
         // print buffer data
-        else if( !strcmp( cmd, "bp" ) || !strcmp( cmd, "bufferprint" ) ) {
+        else if( !strcmp( cmd, "pb" ) || !strcmp( cmd, "printbuffer" ) ) {
             // check for param
             if( scan_ret < 2 ) {
-                printf( "Bufferprint usage : [b]uffer[p]rint buffer_id [type_size [elem_size]].\n" );
+                printf( "Printbuffer usage : [p]rint[b]uffer buffer_id [type_size [elem_size]].\n" );
                 continue;
             }
 
@@ -1760,7 +2160,31 @@ static void DebugFunction() {
                     elem_size = atoi( params[2] );
             }
 
-            PrintBufferData( index, type_size, elem_size );
+            PrintBuffer( index, type_size, elem_size );
+        }
+
+        // print program data
+        else if( !strcmp( cmd, "pp" ) || !strcmp( cmd, "printprogram" ) ) {
+            // check for param
+            if( scan_ret != 2 ) {
+                printf( "Printprogram usage : [p]rint[p]rogram program_id.\n" );
+                continue;
+            }
+
+            int id = atoi( params[0] );
+            PrintProgram( id );
+        }
+
+        // print shader data
+        else if( !strcmp( cmd, "ps" ) || !strcmp( cmd, "printshader" ) ) {
+            // check for param
+            if( scan_ret != 2 ) {
+                printf( "Printshader usage : [p]rint[s]hader shader_id.\n" );
+                continue;
+            }
+
+            int id = atoi( params[0] );
+            PrintShader( id );
         }
 
         // open glfw
@@ -2365,7 +2789,6 @@ void gldlCullFace ( GLenum mode, const char *arg0, const char *file, int line ) 
     }
     gldlCullFace_impl( mode );
 }
-
 void gldlFrontFace ( GLenum mode, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2379,7 +2802,6 @@ void gldlFrontFace ( GLenum mode, const char *arg0, const char *file, int line )
     }
     gldlFrontFace_impl( mode );
 }
-
 void gldlHint ( GLenum target, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2393,35 +2815,32 @@ void gldlHint ( GLenum target, GLenum mode, const char *arg0, const char *arg1, 
     }
     gldlHint_impl( target, mode );
 }
-
 void gldlLineWidth ( GLfloat width, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glLineWidth( %s );\n", file, line,  arg0 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glLineWidth( %f );\n", file, line,  (float)width );
 
     DebugTest( 268 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glLineWidth( width=%s ) at %s:%d\n", debug_break, arg0, file, line );
+        printf( "Breakpoint %s on glLineWidth( width=%f ) at %s:%d\n", debug_break, (float)width, file, line );
         DebugFunction();
     }
     gldlLineWidth_impl( width );
 }
-
 void gldlPointSize ( GLfloat size, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glPointSize( %s );\n", file, line,  arg0 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glPointSize( %f );\n", file, line,  (float)size );
 
     DebugTest( 299 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glPointSize( size=%s ) at %s:%d\n", debug_break, arg0, file, line );
+        printf( "Breakpoint %s on glPointSize( size=%f ) at %s:%d\n", debug_break, (float)size, file, line );
         DebugFunction();
     }
     gldlPointSize_impl( size );
 }
-
 void gldlPolygonMode ( GLenum face, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2435,7 +2854,6 @@ void gldlPolygonMode ( GLenum face, GLenum mode, const char *arg0, const char *a
     }
     gldlPolygonMode_impl( face, mode );
 }
-
 void gldlScissor ( GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2449,21 +2867,19 @@ void gldlScissor ( GLint x, GLint y, GLsizei width, GLsizei height, const char *
     }
     gldlScissor_impl( x, y, width, height );
 }
-
 void gldlTexParameterf ( GLenum target, GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glTexParameterf( %s, %s, %s );\n", file, line, arg0, arg1,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glTexParameterf( %s, %s, %f );\n", file, line, arg0, arg1,  (float)param );
 
     DebugTest( 402 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glTexParameterf( target=%s, pname=%s, param=%s ) at %s:%d\n", debug_break, arg0, arg1, arg2, file, line );
+        printf( "Breakpoint %s on glTexParameterf( target=%s, pname=%s, param=%f ) at %s:%d\n", debug_break, arg0, arg1, (float)param, file, line );
         DebugFunction();
     }
     gldlTexParameterf_impl( target, pname, param );
 }
-
 void gldlTexParameterfv ( GLenum target, GLenum pname, const GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2477,7 +2893,6 @@ void gldlTexParameterfv ( GLenum target, GLenum pname, const GLfloat *params, co
     }
     gldlTexParameterfv_impl( target, pname, params );
 }
-
 void gldlTexParameteri ( GLenum target, GLenum pname, GLint param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2491,7 +2906,6 @@ void gldlTexParameteri ( GLenum target, GLenum pname, GLint param, const char *a
     }
     gldlTexParameteri_impl( target, pname, param );
 }
-
 void gldlTexParameteriv ( GLenum target, GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2505,7 +2919,6 @@ void gldlTexParameteriv ( GLenum target, GLenum pname, const GLint *params, cons
     }
     gldlTexParameteriv_impl( target, pname, params );
 }
-
 void gldlTexImage1D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2519,7 +2932,6 @@ void gldlTexImage1D ( GLenum target, GLint level, GLint internalformat, GLsizei 
     }
     gldlTexImage1D_impl( target, level, internalformat, width, border, format, type, pixels );
 }
-
 void gldlTexImage2D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2533,7 +2945,6 @@ void gldlTexImage2D ( GLenum target, GLint level, GLint internalformat, GLsizei 
     }
     gldlTexImage2D_impl( target, level, internalformat, width, height, border, format, type, pixels );
 }
-
 void gldlDrawBuffer ( GLenum mode, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2547,7 +2958,6 @@ void gldlDrawBuffer ( GLenum mode, const char *arg0, const char *file, int line 
     }
     gldlDrawBuffer_impl( mode );
 }
-
 void gldlClear ( GLbitfield mask, const char *arg0, const char *file, int line ) {
     if( gldl_traces[0].started ) {
         gldl_traces[0].started = 0;
@@ -2566,21 +2976,19 @@ void gldlClear ( GLbitfield mask, const char *arg0, const char *file, int line )
     }
     gldlClear_impl( mask );
 }
-
 void gldlClearColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glClearColor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glClearColor( %f, %f, %f, %f );\n", file, line, (float)red, (float)green, (float)blue,  (float)alpha );
 
     DebugTest( 44 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glClearColor( red=%s, green=%s, blue=%s, alpha=%s ) at %s:%d\n", debug_break, arg0, arg1, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glClearColor( red=%f, green=%f, blue=%f, alpha=%f ) at %s:%d\n", debug_break, (float)red, (float)green, (float)blue, (float)alpha, file, line );
         DebugFunction();
     }
     gldlClearColor_impl( red, green, blue, alpha );
 }
-
 void gldlClearStencil ( GLint s, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2594,21 +3002,19 @@ void gldlClearStencil ( GLint s, const char *arg0, const char *file, int line ) 
     }
     gldlClearStencil_impl( s );
 }
-
 void gldlClearDepth ( GLclampd depth, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glClearDepth( %s );\n", file, line,  arg0 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glClearDepth( %f );\n", file, line,  (float)depth );
 
     DebugTest( 45 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glClearDepth( depth=%s ) at %s:%d\n", debug_break, arg0, file, line );
+        printf( "Breakpoint %s on glClearDepth( depth=%f ) at %s:%d\n", debug_break, (float)depth, file, line );
         DebugFunction();
     }
     gldlClearDepth_impl( depth );
 }
-
 void gldlStencilMask ( GLuint mask, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2622,7 +3028,6 @@ void gldlStencilMask ( GLuint mask, const char *arg0, const char *file, int line
     }
     gldlStencilMask_impl( mask );
 }
-
 void gldlColorMask ( GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2636,7 +3041,6 @@ void gldlColorMask ( GLboolean red, GLboolean green, GLboolean blue, GLboolean a
     }
     gldlColorMask_impl( red, green, blue, alpha );
 }
-
 void gldlDepthMask ( GLboolean flag, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2650,7 +3054,6 @@ void gldlDepthMask ( GLboolean flag, const char *arg0, const char *file, int lin
     }
     gldlDepthMask_impl( flag );
 }
-
 void gldlDisable ( GLenum cap, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2664,7 +3067,6 @@ void gldlDisable ( GLenum cap, const char *arg0, const char *file, int line ) {
     }
     gldlDisable_impl( cap );
 }
-
 void gldlEnable ( GLenum cap, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2678,7 +3080,6 @@ void gldlEnable ( GLenum cap, const char *arg0, const char *file, int line ) {
     }
     gldlEnable_impl( cap );
 }
-
 void gldlFinish ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2693,7 +3094,6 @@ void gldlFinish ( const char *file, int line ) {
     }
     gldlFinish_impl(  );
 }
-
 void gldlFlush ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2708,7 +3108,6 @@ void gldlFlush ( const char *file, int line ) {
     }
     gldlFlush_impl(  );
 }
-
 void gldlBlendFunc ( GLenum sfactor, GLenum dfactor, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2722,7 +3121,6 @@ void gldlBlendFunc ( GLenum sfactor, GLenum dfactor, const char *arg0, const cha
     }
     gldlBlendFunc_impl( sfactor, dfactor );
 }
-
 void gldlLogicOp ( GLenum opcode, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2736,7 +3134,6 @@ void gldlLogicOp ( GLenum opcode, const char *arg0, const char *file, int line )
     }
     gldlLogicOp_impl( opcode );
 }
-
 void gldlStencilFunc ( GLenum func, GLint ref, GLuint mask, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2750,7 +3147,6 @@ void gldlStencilFunc ( GLenum func, GLint ref, GLuint mask, const char *arg0, co
     }
     gldlStencilFunc_impl( func, ref, mask );
 }
-
 void gldlStencilOp ( GLenum fail, GLenum zfail, GLenum zpass, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2764,7 +3160,6 @@ void gldlStencilOp ( GLenum fail, GLenum zfail, GLenum zpass, const char *arg0, 
     }
     gldlStencilOp_impl( fail, zfail, zpass );
 }
-
 void gldlDepthFunc ( GLenum func, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2778,21 +3173,19 @@ void gldlDepthFunc ( GLenum func, const char *arg0, const char *file, int line )
     }
     gldlDepthFunc_impl( func );
 }
-
 void gldlPixelStoref ( GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glPixelStoref( %s, %s );\n", file, line, arg0,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glPixelStoref( %s, %f );\n", file, line, arg0,  (float)param );
 
     DebugTest( 293 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glPixelStoref( pname=%s, param=%s ) at %s:%d\n", debug_break, arg0, arg1, file, line );
+        printf( "Breakpoint %s on glPixelStoref( pname=%s, param=%f ) at %s:%d\n", debug_break, arg0, (float)param, file, line );
         DebugFunction();
     }
     gldlPixelStoref_impl( pname, param );
 }
-
 void gldlPixelStorei ( GLenum pname, GLint param, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2806,7 +3199,6 @@ void gldlPixelStorei ( GLenum pname, GLint param, const char *arg0, const char *
     }
     gldlPixelStorei_impl( pname, param );
 }
-
 void gldlReadBuffer ( GLenum mode, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2820,7 +3212,6 @@ void gldlReadBuffer ( GLenum mode, const char *arg0, const char *file, int line 
     }
     gldlReadBuffer_impl( mode );
 }
-
 void gldlReadPixels ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2834,7 +3225,6 @@ void gldlReadPixels ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum fo
     }
     gldlReadPixels_impl( x, y, width, height, format, type, pixels );
 }
-
 void gldlGetBooleanv ( GLenum pname, GLboolean *params, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2848,7 +3238,6 @@ void gldlGetBooleanv ( GLenum pname, GLboolean *params, const char *arg0, const 
     }
     gldlGetBooleanv_impl( pname, params );
 }
-
 void gldlGetDoublev ( GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2862,7 +3251,6 @@ void gldlGetDoublev ( GLenum pname, GLdouble *params, const char *arg0, const ch
     }
     gldlGetDoublev_impl( pname, params );
 }
-
 GLenum gldlGetError ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2875,9 +3263,9 @@ GLenum gldlGetError ( const char *file, int line ) {
 
         DebugFunction();
     }
-    return gldlGetError_impl(  );
+    GLenum ret = gldlGetError_impl(  );
+	return ret;
 }
-
 void gldlGetFloatv ( GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2891,7 +3279,6 @@ void gldlGetFloatv ( GLenum pname, GLfloat *params, const char *arg0, const char
     }
     gldlGetFloatv_impl( pname, params );
 }
-
 void gldlGetIntegerv ( GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2905,7 +3292,6 @@ void gldlGetIntegerv ( GLenum pname, GLint *params, const char *arg0, const char
     }
     gldlGetIntegerv_impl( pname, params );
 }
-
 const GLubyte * gldlGetString ( GLenum name, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2917,9 +3303,9 @@ const GLubyte * gldlGetString ( GLenum name, const char *arg0, const char *file,
         printf( "Breakpoint %s on glGetString( name=%s ) at %s:%d\n", debug_break, arg0, file, line );
         DebugFunction();
     }
-    return gldlGetString_impl( name );
+    const GLubyte * ret = gldlGetString_impl( name );
+	return ret;
 }
-
 void gldlGetTexImage ( GLenum target, GLint level, GLenum format, GLenum type, GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2933,7 +3319,6 @@ void gldlGetTexImage ( GLenum target, GLint level, GLenum format, GLenum type, G
     }
     gldlGetTexImage_impl( target, level, format, type, pixels );
 }
-
 void gldlGetTexParameterfv ( GLenum target, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2947,7 +3332,6 @@ void gldlGetTexParameterfv ( GLenum target, GLenum pname, GLfloat *params, const
     }
     gldlGetTexParameterfv_impl( target, pname, params );
 }
-
 void gldlGetTexParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2961,7 +3345,6 @@ void gldlGetTexParameteriv ( GLenum target, GLenum pname, GLint *params, const c
     }
     gldlGetTexParameteriv_impl( target, pname, params );
 }
-
 void gldlGetTexLevelParameterfv ( GLenum target, GLint level, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2975,7 +3358,6 @@ void gldlGetTexLevelParameterfv ( GLenum target, GLint level, GLenum pname, GLfl
     }
     gldlGetTexLevelParameterfv_impl( target, level, pname, params );
 }
-
 void gldlGetTexLevelParameteriv ( GLenum target, GLint level, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -2989,7 +3371,6 @@ void gldlGetTexLevelParameteriv ( GLenum target, GLint level, GLenum pname, GLin
     }
     gldlGetTexLevelParameteriv_impl( target, level, pname, params );
 }
-
 GLboolean gldlIsEnabled ( GLenum cap, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3001,23 +3382,22 @@ GLboolean gldlIsEnabled ( GLenum cap, const char *arg0, const char *file, int li
         printf( "Breakpoint %s on glIsEnabled( cap=%s ) at %s:%d\n", debug_break, arg0, file, line );
         DebugFunction();
     }
-    return gldlIsEnabled_impl( cap );
+    GLboolean ret = gldlIsEnabled_impl( cap );
+	return ret;
 }
-
 void gldlDepthRange ( GLclampd near, GLclampd far, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glDepthRange( %s, %s );\n", file, line, arg0,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glDepthRange( %f, %f );\n", file, line, (float)near,  (float)far );
 
     DebugTest( 92 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glDepthRange( near=%s, far=%s ) at %s:%d\n", debug_break, arg0, arg1, file, line );
+        printf( "Breakpoint %s on glDepthRange( near=%f, far=%f ) at %s:%d\n", debug_break, (float)near, (float)far, file, line );
         DebugFunction();
     }
     gldlDepthRange_impl( near, far );
 }
-
 void gldlViewport ( GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3031,7 +3411,6 @@ void gldlViewport ( GLint x, GLint y, GLsizei width, GLsizei height, const char 
     }
     gldlViewport_impl( x, y, width, height );
 }
-
 void gldlDrawArrays ( GLenum mode, GLint first, GLsizei count, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3045,7 +3424,6 @@ void gldlDrawArrays ( GLenum mode, GLint first, GLsizei count, const char *arg0,
     }
     gldlDrawArrays_impl( mode, first, count );
 }
-
 void gldlDrawElements ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3059,7 +3437,6 @@ void gldlDrawElements ( GLenum mode, GLsizei count, GLenum type, const GLvoid *i
     }
     gldlDrawElements_impl( mode, count, type, indices );
 }
-
 void gldlGetPointerv ( GLenum pname, GLvoid* *params, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3073,21 +3450,19 @@ void gldlGetPointerv ( GLenum pname, GLvoid* *params, const char *arg0, const ch
     }
     gldlGetPointerv_impl( pname, params );
 }
-
 void gldlPolygonOffset ( GLfloat factor, GLfloat units, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glPolygonOffset( %s, %s );\n", file, line, arg0,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glPolygonOffset( %f, %f );\n", file, line, (float)factor,  (float)units );
 
     DebugTest( 301 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glPolygonOffset( factor=%s, units=%s ) at %s:%d\n", debug_break, arg0, arg1, file, line );
+        printf( "Breakpoint %s on glPolygonOffset( factor=%f, units=%f ) at %s:%d\n", debug_break, (float)factor, (float)units, file, line );
         DebugFunction();
     }
     gldlPolygonOffset_impl( factor, units );
 }
-
 void gldlCopyTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLint border, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3101,7 +3476,6 @@ void gldlCopyTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLi
     }
     gldlCopyTexImage1D_impl( target, level, internalformat, x, y, width, border );
 }
-
 void gldlCopyTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3115,7 +3489,6 @@ void gldlCopyTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLi
     }
     gldlCopyTexImage2D_impl( target, level, internalformat, x, y, width, height, border );
 }
-
 void gldlCopyTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLint x, GLint y, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3129,7 +3502,6 @@ void gldlCopyTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLint x,
     }
     gldlCopyTexSubImage1D_impl( target, level, xoffset, x, y, width );
 }
-
 void gldlCopyTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3143,7 +3515,6 @@ void gldlCopyTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yo
     }
     gldlCopyTexSubImage2D_impl( target, level, xoffset, yoffset, x, y, width, height );
 }
-
 void gldlTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3157,7 +3528,6 @@ void gldlTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei widt
     }
     gldlTexSubImage1D_impl( target, level, xoffset, width, format, type, pixels );
 }
-
 void gldlTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3171,7 +3541,6 @@ void gldlTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffse
     }
     gldlTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, type, pixels );
 }
-
 void gldlBindTexture ( GLenum target, GLuint texture, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3185,7 +3554,6 @@ void gldlBindTexture ( GLenum target, GLuint texture, const char *arg0, const ch
     }
     gldlBindTexture_impl( target, texture );
 }
-
 void gldlDeleteTextures ( GLsizei n, const GLuint *textures, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3199,7 +3567,6 @@ void gldlDeleteTextures ( GLsizei n, const GLuint *textures, const char *arg0, c
     }
     gldlDeleteTextures_impl( n, textures );
 }
-
 void gldlGenTextures ( GLsizei n, GLuint *textures, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3213,7 +3580,6 @@ void gldlGenTextures ( GLsizei n, GLuint *textures, const char *arg0, const char
     }
     gldlGenTextures_impl( n, textures );
 }
-
 GLboolean gldlIsTexture ( GLuint texture, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3225,23 +3591,22 @@ GLboolean gldlIsTexture ( GLuint texture, const char *arg0, const char *file, in
         printf( "Breakpoint %s on glIsTexture( texture=%d ) at %s:%d\n", debug_break, texture, file, line );
         DebugFunction();
     }
-    return gldlIsTexture_impl( texture );
+    GLboolean ret = gldlIsTexture_impl( texture );
+	return ret;
 }
-
 void gldlBlendColor ( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glBlendColor( %s, %s, %s, %s );\n", file, line, arg0, arg1, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glBlendColor( %f, %f, %f, %f );\n", file, line, (float)red, (float)green, (float)blue,  (float)alpha );
 
     DebugTest( 21 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glBlendColor( red=%s, green=%s, blue=%s, alpha=%s ) at %s:%d\n", debug_break, arg0, arg1, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glBlendColor( red=%f, green=%f, blue=%f, alpha=%f ) at %s:%d\n", debug_break, (float)red, (float)green, (float)blue, (float)alpha, file, line );
         DebugFunction();
     }
     gldlBlendColor_impl( red, green, blue, alpha );
 }
-
 void gldlBlendEquation ( GLenum mode, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3255,7 +3620,6 @@ void gldlBlendEquation ( GLenum mode, const char *arg0, const char *file, int li
     }
     gldlBlendEquation_impl( mode );
 }
-
 void gldlDrawRangeElements ( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3269,7 +3633,6 @@ void gldlDrawRangeElements ( GLenum mode, GLuint start, GLuint end, GLsizei coun
     }
     gldlDrawRangeElements_impl( mode, start, end, count, type, indices );
 }
-
 void gldlTexImage3D ( GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3283,7 +3646,6 @@ void gldlTexImage3D ( GLenum target, GLint level, GLint internalformat, GLsizei 
     }
     gldlTexImage3D_impl( target, level, internalformat, width, height, depth, border, format, type, pixels );
 }
-
 void gldlTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *arg10, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3297,7 +3659,6 @@ void gldlTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffse
     }
     gldlTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels );
 }
-
 void gldlCopyTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3311,7 +3672,6 @@ void gldlCopyTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yo
     }
     gldlCopyTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, x, y, width, height );
 }
-
 void gldlActiveTexture ( GLenum texture, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3325,21 +3685,19 @@ void gldlActiveTexture ( GLenum texture, const char *arg0, const char *file, int
     }
     gldlActiveTexture_impl( texture );
 }
-
 void gldlSampleCoverage ( GLclampf value, GLboolean invert, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glSampleCoverage( %s, %d );\n", file, line, arg0,  invert );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glSampleCoverage( %f, %d );\n", file, line, (float)value,  invert );
 
     DebugTest( 364 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glSampleCoverage( value=%s, invert=%d ) at %s:%d\n", debug_break, arg0, invert, file, line );
+        printf( "Breakpoint %s on glSampleCoverage( value=%f, invert=%d ) at %s:%d\n", debug_break, (float)value, invert, file, line );
         DebugFunction();
     }
     gldlSampleCoverage_impl( value, invert );
 }
-
 void gldlCompressedTexImage3D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3353,7 +3711,6 @@ void gldlCompressedTexImage3D ( GLenum target, GLint level, GLenum internalforma
     }
     gldlCompressedTexImage3D_impl( target, level, internalformat, width, height, depth, border, imageSize, data );
 }
-
 void gldlCompressedTexImage2D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3367,7 +3724,6 @@ void gldlCompressedTexImage2D ( GLenum target, GLint level, GLenum internalforma
     }
     gldlCompressedTexImage2D_impl( target, level, internalformat, width, height, border, imageSize, data );
 }
-
 void gldlCompressedTexImage1D ( GLenum target, GLint level, GLenum internalformat, GLsizei width, GLint border, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3381,7 +3737,6 @@ void gldlCompressedTexImage1D ( GLenum target, GLint level, GLenum internalforma
     }
     gldlCompressedTexImage1D_impl( target, level, internalformat, width, border, imageSize, data );
 }
-
 void gldlCompressedTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *arg10, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3395,7 +3750,6 @@ void gldlCompressedTexSubImage3D ( GLenum target, GLint level, GLint xoffset, GL
     }
     gldlCompressedTexSubImage3D_impl( target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data );
 }
-
 void gldlCompressedTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3409,7 +3763,6 @@ void gldlCompressedTexSubImage2D ( GLenum target, GLint level, GLint xoffset, GL
     }
     gldlCompressedTexSubImage2D_impl( target, level, xoffset, yoffset, width, height, format, imageSize, data );
 }
-
 void gldlCompressedTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLsizei imageSize, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3423,7 +3776,6 @@ void gldlCompressedTexSubImage1D ( GLenum target, GLint level, GLint xoffset, GL
     }
     gldlCompressedTexSubImage1D_impl( target, level, xoffset, width, format, imageSize, data );
 }
-
 void gldlGetCompressedTexImage ( GLenum target, GLint level, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3437,7 +3789,6 @@ void gldlGetCompressedTexImage ( GLenum target, GLint level, GLvoid *img, const 
     }
     gldlGetCompressedTexImage_impl( target, level, img );
 }
-
 void gldlBlendFuncSeparate ( GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3451,7 +3802,6 @@ void gldlBlendFuncSeparate ( GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfacto
     }
     gldlBlendFuncSeparate_impl( sfactorRGB, dfactorRGB, sfactorAlpha, dfactorAlpha );
 }
-
 void gldlMultiDrawArrays ( GLenum mode, const GLint *first, const GLsizei *count, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3465,7 +3815,6 @@ void gldlMultiDrawArrays ( GLenum mode, const GLint *first, const GLsizei *count
     }
     gldlMultiDrawArrays_impl( mode, first, count, primcount );
 }
-
 void gldlMultiDrawElements ( GLenum mode, const GLsizei *count, GLenum type, const GLvoid* *indices, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3479,21 +3828,19 @@ void gldlMultiDrawElements ( GLenum mode, const GLsizei *count, GLenum type, con
     }
     gldlMultiDrawElements_impl( mode, count, type, indices, primcount );
 }
-
 void gldlPointParameterf ( GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glPointParameterf( %s, %s );\n", file, line, arg0,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glPointParameterf( %s, %f );\n", file, line, arg0,  (float)param );
 
     DebugTest( 295 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glPointParameterf( pname=%s, param=%s ) at %s:%d\n", debug_break, arg0, arg1, file, line );
+        printf( "Breakpoint %s on glPointParameterf( pname=%s, param=%f ) at %s:%d\n", debug_break, arg0, (float)param, file, line );
         DebugFunction();
     }
     gldlPointParameterf_impl( pname, param );
 }
-
 void gldlPointParameterfv ( GLenum pname, const GLfloat *params, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3507,7 +3854,6 @@ void gldlPointParameterfv ( GLenum pname, const GLfloat *params, const char *arg
     }
     gldlPointParameterfv_impl( pname, params );
 }
-
 void gldlPointParameteri ( GLenum pname, GLint param, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3521,7 +3867,6 @@ void gldlPointParameteri ( GLenum pname, GLint param, const char *arg0, const ch
     }
     gldlPointParameteri_impl( pname, param );
 }
-
 void gldlPointParameteriv ( GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3535,7 +3880,6 @@ void gldlPointParameteriv ( GLenum pname, const GLint *params, const char *arg0,
     }
     gldlPointParameteriv_impl( pname, params );
 }
-
 void gldlGenQueries ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3549,7 +3893,6 @@ void gldlGenQueries ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1
     }
     gldlGenQueries_impl( n, ids );
 }
-
 void gldlDeleteQueries ( GLsizei n, const GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3563,7 +3906,6 @@ void gldlDeleteQueries ( GLsizei n, const GLuint *ids, const char *arg0, const c
     }
     gldlDeleteQueries_impl( n, ids );
 }
-
 GLboolean gldlIsQuery ( GLuint id, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3575,9 +3917,9 @@ GLboolean gldlIsQuery ( GLuint id, const char *arg0, const char *file, int line 
         printf( "Breakpoint %s on glIsQuery( id=%d ) at %s:%d\n", debug_break, id, file, line );
         DebugFunction();
     }
-    return gldlIsQuery_impl( id );
+    GLboolean ret = gldlIsQuery_impl( id );
+	return ret;
 }
-
 void gldlBeginQuery ( GLenum target, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3591,7 +3933,6 @@ void gldlBeginQuery ( GLenum target, GLuint id, const char *arg0, const char *ar
     }
     gldlBeginQuery_impl( target, id );
 }
-
 void gldlEndQuery ( GLenum target, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3605,7 +3946,6 @@ void gldlEndQuery ( GLenum target, const char *arg0, const char *file, int line 
     }
     gldlEndQuery_impl( target );
 }
-
 void gldlGetQueryiv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3619,7 +3959,6 @@ void gldlGetQueryiv ( GLenum target, GLenum pname, GLint *params, const char *ar
     }
     gldlGetQueryiv_impl( target, pname, params );
 }
-
 void gldlGetQueryObjectiv ( GLuint id, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3633,7 +3972,6 @@ void gldlGetQueryObjectiv ( GLuint id, GLenum pname, GLint *params, const char *
     }
     gldlGetQueryObjectiv_impl( id, pname, params );
 }
-
 void gldlGetQueryObjectuiv ( GLuint id, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3647,7 +3985,6 @@ void gldlGetQueryObjectuiv ( GLuint id, GLenum pname, GLuint *params, const char
     }
     gldlGetQueryObjectuiv_impl( id, pname, params );
 }
-
 void gldlBindBuffer ( GLenum target, GLuint buffer, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3662,7 +3999,6 @@ void gldlBindBuffer ( GLenum target, GLuint buffer, const char *arg0, const char
     gldlBindBuffer_impl( target, buffer );
 	BindBuffer( buffer, target == GL_ARRAY_BUFFER ? 0 : 1 );
 }
-
 void gldlDeleteBuffers ( GLsizei n, const GLuint *buffers, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3677,7 +4013,6 @@ void gldlDeleteBuffers ( GLsizei n, const GLuint *buffers, const char *arg0, con
     gldlDeleteBuffers_impl( n, buffers );
 	DeleteBuffers( n, buffers );
 }
-
 void gldlGenBuffers ( GLsizei n, GLuint *buffers, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3692,7 +4027,6 @@ void gldlGenBuffers ( GLsizei n, GLuint *buffers, const char *arg0, const char *
     gldlGenBuffers_impl( n, buffers );
 	AddBuffers( n, buffers );
 }
-
 GLboolean gldlIsBuffer ( GLuint buffer, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3704,9 +4038,9 @@ GLboolean gldlIsBuffer ( GLuint buffer, const char *arg0, const char *file, int 
         printf( "Breakpoint %s on glIsBuffer( buffer=%d ) at %s:%d\n", debug_break, buffer, file, line );
         DebugFunction();
     }
-    return gldlIsBuffer_impl( buffer );
+    GLboolean ret = gldlIsBuffer_impl( buffer );
+	return ret;
 }
-
 void gldlBufferData ( GLenum target, GLsizeiptr size, const GLvoid *data, GLenum usage, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3721,7 +4055,6 @@ void gldlBufferData ( GLenum target, GLsizeiptr size, const GLvoid *data, GLenum
     gldlBufferData_impl( target, size, data, usage );
 	FillBuffer( data, size, 0, target == GL_ARRAY_BUFFER ? 0 : 1 );
 }
-
 void gldlBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3736,7 +4069,6 @@ void gldlBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, const 
     gldlBufferSubData_impl( target, offset, size, data );
 	FillBuffer( data, size, offset, target == GL_ARRAY_BUFFER ? 0 : 1 );
 }
-
 void gldlGetBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3750,7 +4082,6 @@ void gldlGetBufferSubData ( GLenum target, GLintptr offset, GLsizeiptr size, GLv
     }
     gldlGetBufferSubData_impl( target, offset, size, data );
 }
-
 GLvoid* gldlMapBuffer ( GLenum target, GLenum access, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3762,9 +4093,9 @@ GLvoid* gldlMapBuffer ( GLenum target, GLenum access, const char *arg0, const ch
         printf( "Breakpoint %s on glMapBuffer( target=%s, access=%s ) at %s:%d\n", debug_break, arg0, arg1, file, line );
         DebugFunction();
     }
-    return gldlMapBuffer_impl( target, access );
+    GLvoid* ret = gldlMapBuffer_impl( target, access );
+	return ret;
 }
-
 GLboolean gldlUnmapBuffer ( GLenum target, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3776,9 +4107,9 @@ GLboolean gldlUnmapBuffer ( GLenum target, const char *arg0, const char *file, i
         printf( "Breakpoint %s on glUnmapBuffer( target=%s ) at %s:%d\n", debug_break, arg0, file, line );
         DebugFunction();
     }
-    return gldlUnmapBuffer_impl( target );
+    GLboolean ret = gldlUnmapBuffer_impl( target );
+	return ret;
 }
-
 void gldlGetBufferParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3792,7 +4123,6 @@ void gldlGetBufferParameteriv ( GLenum target, GLenum pname, GLint *params, cons
     }
     gldlGetBufferParameteriv_impl( target, pname, params );
 }
-
 void gldlGetBufferPointerv ( GLenum target, GLenum pname, GLvoid* *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3806,7 +4136,6 @@ void gldlGetBufferPointerv ( GLenum target, GLenum pname, GLvoid* *params, const
     }
     gldlGetBufferPointerv_impl( target, pname, params );
 }
-
 void gldlBlendEquationSeparate ( GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3820,7 +4149,6 @@ void gldlBlendEquationSeparate ( GLenum modeRGB, GLenum modeAlpha, const char *a
     }
     gldlBlendEquationSeparate_impl( modeRGB, modeAlpha );
 }
-
 void gldlDrawBuffers ( GLsizei n, const GLenum *bufs, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3834,7 +4162,6 @@ void gldlDrawBuffers ( GLsizei n, const GLenum *bufs, const char *arg0, const ch
     }
     gldlDrawBuffers_impl( n, bufs );
 }
-
 void gldlStencilOpSeparate ( GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3848,7 +4175,6 @@ void gldlStencilOpSeparate ( GLenum face, GLenum sfail, GLenum dpfail, GLenum dp
     }
     gldlStencilOpSeparate_impl( face, sfail, dpfail, dppass );
 }
-
 void gldlStencilFuncSeparate ( GLenum face, GLenum func, GLint ref, GLuint mask, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3862,7 +4188,6 @@ void gldlStencilFuncSeparate ( GLenum face, GLenum func, GLint ref, GLuint mask,
     }
     gldlStencilFuncSeparate_impl( face, func, ref, mask );
 }
-
 void gldlStencilMaskSeparate ( GLenum face, GLuint mask, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3876,7 +4201,6 @@ void gldlStencilMaskSeparate ( GLenum face, GLuint mask, const char *arg0, const
     }
     gldlStencilMaskSeparate_impl( face, mask );
 }
-
 void gldlAttachShader ( GLuint program, GLuint shader, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3889,8 +4213,8 @@ void gldlAttachShader ( GLuint program, GLuint shader, const char *arg0, const c
         DebugFunction();
     }
     gldlAttachShader_impl( program, shader );
+	AttachShader( program, shader );
 }
-
 void gldlBindAttribLocation ( GLuint program, GLuint index, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3904,7 +4228,6 @@ void gldlBindAttribLocation ( GLuint program, GLuint index, const GLchar *name, 
     }
     gldlBindAttribLocation_impl( program, index, name );
 }
-
 void gldlCompileShader ( GLuint shader, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3918,7 +4241,6 @@ void gldlCompileShader ( GLuint shader, const char *arg0, const char *file, int 
     }
     gldlCompileShader_impl( shader );
 }
-
 GLuint gldlCreateProgram ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3931,9 +4253,10 @@ GLuint gldlCreateProgram ( const char *file, int line ) {
 
         DebugFunction();
     }
-    return gldlCreateProgram_impl(  );
+    GLuint ret = gldlCreateProgram_impl(  );
+	AddProgram( ret );
+	return ret;
 }
-
 GLuint gldlCreateShader ( GLenum type, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3945,9 +4268,10 @@ GLuint gldlCreateShader ( GLenum type, const char *arg0, const char *file, int l
         printf( "Breakpoint %s on glCreateShader( type=%s ) at %s:%d\n", debug_break, arg0, file, line );
         DebugFunction();
     }
-    return gldlCreateShader_impl( type );
+    GLuint ret = gldlCreateShader_impl( type );
+	AddShader( ret, type );
+	return ret;
 }
-
 void gldlDeleteProgram ( GLuint program, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3960,8 +4284,8 @@ void gldlDeleteProgram ( GLuint program, const char *arg0, const char *file, int
         DebugFunction();
     }
     gldlDeleteProgram_impl( program );
+	DeleteProgram( program );
 }
-
 void gldlDeleteShader ( GLuint shader, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3974,8 +4298,8 @@ void gldlDeleteShader ( GLuint shader, const char *arg0, const char *file, int l
         DebugFunction();
     }
     gldlDeleteShader_impl( shader );
+	DeleteShader( shader );
 }
-
 void gldlDetachShader ( GLuint program, GLuint shader, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -3988,8 +4312,8 @@ void gldlDetachShader ( GLuint program, GLuint shader, const char *arg0, const c
         DebugFunction();
     }
     gldlDetachShader_impl( program, shader );
+	DetachShader( program, shader );
 }
-
 void gldlDisableVertexAttribArray ( GLuint index, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4003,7 +4327,6 @@ void gldlDisableVertexAttribArray ( GLuint index, const char *arg0, const char *
     }
     gldlDisableVertexAttribArray_impl( index );
 }
-
 void gldlEnableVertexAttribArray ( GLuint index, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4017,7 +4340,6 @@ void gldlEnableVertexAttribArray ( GLuint index, const char *arg0, const char *f
     }
     gldlEnableVertexAttribArray_impl( index );
 }
-
 void gldlGetActiveAttrib ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4031,7 +4353,6 @@ void gldlGetActiveAttrib ( GLuint program, GLuint index, GLsizei bufSize, GLsize
     }
     gldlGetActiveAttrib_impl( program, index, bufSize, length, size, type, name );
 }
-
 void gldlGetActiveUniform ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4045,7 +4366,6 @@ void gldlGetActiveUniform ( GLuint program, GLuint index, GLsizei bufSize, GLsiz
     }
     gldlGetActiveUniform_impl( program, index, bufSize, length, size, type, name );
 }
-
 void gldlGetAttachedShaders ( GLuint program, GLsizei maxCount, GLsizei *count, GLuint *obj, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4059,7 +4379,6 @@ void gldlGetAttachedShaders ( GLuint program, GLsizei maxCount, GLsizei *count, 
     }
     gldlGetAttachedShaders_impl( program, maxCount, count, obj );
 }
-
 GLint gldlGetAttribLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4071,9 +4390,9 @@ GLint gldlGetAttribLocation ( GLuint program, const GLchar *name, const char *ar
         printf( "Breakpoint %s on glGetAttribLocation( program=%d, name=%s ) at %s:%d\n", debug_break, program, arg1, file, line );
         DebugFunction();
     }
-    return gldlGetAttribLocation_impl( program, name );
+    GLint ret = gldlGetAttribLocation_impl( program, name );
+	return ret;
 }
-
 void gldlGetProgramiv ( GLuint program, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4087,7 +4406,6 @@ void gldlGetProgramiv ( GLuint program, GLenum pname, GLint *params, const char 
     }
     gldlGetProgramiv_impl( program, pname, params );
 }
-
 void gldlGetProgramInfoLog ( GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4101,7 +4419,6 @@ void gldlGetProgramInfoLog ( GLuint program, GLsizei bufSize, GLsizei *length, G
     }
     gldlGetProgramInfoLog_impl( program, bufSize, length, infoLog );
 }
-
 void gldlGetShaderiv ( GLuint shader, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4115,7 +4432,6 @@ void gldlGetShaderiv ( GLuint shader, GLenum pname, GLint *params, const char *a
     }
     gldlGetShaderiv_impl( shader, pname, params );
 }
-
 void gldlGetShaderInfoLog ( GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4129,7 +4445,6 @@ void gldlGetShaderInfoLog ( GLuint shader, GLsizei bufSize, GLsizei *length, GLc
     }
     gldlGetShaderInfoLog_impl( shader, bufSize, length, infoLog );
 }
-
 void gldlGetShaderSource ( GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4143,7 +4458,6 @@ void gldlGetShaderSource ( GLuint shader, GLsizei bufSize, GLsizei *length, GLch
     }
     gldlGetShaderSource_impl( shader, bufSize, length, source );
 }
-
 GLint gldlGetUniformLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4155,9 +4469,9 @@ GLint gldlGetUniformLocation ( GLuint program, const GLchar *name, const char *a
         printf( "Breakpoint %s on glGetUniformLocation( program=%d, name=%s ) at %s:%d\n", debug_break, program, arg1, file, line );
         DebugFunction();
     }
-    return gldlGetUniformLocation_impl( program, name );
+    GLint ret = gldlGetUniformLocation_impl( program, name );
+	return ret;
 }
-
 void gldlGetUniformfv ( GLuint program, GLint location, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4171,7 +4485,6 @@ void gldlGetUniformfv ( GLuint program, GLint location, GLfloat *params, const c
     }
     gldlGetUniformfv_impl( program, location, params );
 }
-
 void gldlGetUniformiv ( GLuint program, GLint location, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4185,7 +4498,6 @@ void gldlGetUniformiv ( GLuint program, GLint location, GLint *params, const cha
     }
     gldlGetUniformiv_impl( program, location, params );
 }
-
 void gldlGetVertexAttribdv ( GLuint index, GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4199,7 +4511,6 @@ void gldlGetVertexAttribdv ( GLuint index, GLenum pname, GLdouble *params, const
     }
     gldlGetVertexAttribdv_impl( index, pname, params );
 }
-
 void gldlGetVertexAttribfv ( GLuint index, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4213,7 +4524,6 @@ void gldlGetVertexAttribfv ( GLuint index, GLenum pname, GLfloat *params, const 
     }
     gldlGetVertexAttribfv_impl( index, pname, params );
 }
-
 void gldlGetVertexAttribiv ( GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4227,7 +4537,6 @@ void gldlGetVertexAttribiv ( GLuint index, GLenum pname, GLint *params, const ch
     }
     gldlGetVertexAttribiv_impl( index, pname, params );
 }
-
 void gldlGetVertexAttribPointerv ( GLuint index, GLenum pname, GLvoid* *pointer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4241,7 +4550,6 @@ void gldlGetVertexAttribPointerv ( GLuint index, GLenum pname, GLvoid* *pointer,
     }
     gldlGetVertexAttribPointerv_impl( index, pname, pointer );
 }
-
 GLboolean gldlIsProgram ( GLuint program, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4253,9 +4561,9 @@ GLboolean gldlIsProgram ( GLuint program, const char *arg0, const char *file, in
         printf( "Breakpoint %s on glIsProgram( program=%d ) at %s:%d\n", debug_break, program, file, line );
         DebugFunction();
     }
-    return gldlIsProgram_impl( program );
+    GLboolean ret = gldlIsProgram_impl( program );
+	return ret;
 }
-
 GLboolean gldlIsShader ( GLuint shader, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4267,9 +4575,9 @@ GLboolean gldlIsShader ( GLuint shader, const char *arg0, const char *file, int 
         printf( "Breakpoint %s on glIsShader( shader=%d ) at %s:%d\n", debug_break, shader, file, line );
         DebugFunction();
     }
-    return gldlIsShader_impl( shader );
+    GLboolean ret = gldlIsShader_impl( shader );
+	return ret;
 }
-
 void gldlLinkProgram ( GLuint program, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4283,7 +4591,6 @@ void gldlLinkProgram ( GLuint program, const char *arg0, const char *file, int l
     }
     gldlLinkProgram_impl( program );
 }
-
 void gldlShaderSource ( GLuint shader, GLsizei count, const GLchar* *string, const GLint *length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4296,8 +4603,8 @@ void gldlShaderSource ( GLuint shader, GLsizei count, const GLchar* *string, con
         DebugFunction();
     }
     gldlShaderSource_impl( shader, count, string, length );
+	SetShaderSource( shader, string[0] );
 }
-
 void gldlUseProgram ( GLuint program, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4310,64 +4617,60 @@ void gldlUseProgram ( GLuint program, const char *arg0, const char *file, int li
         DebugFunction();
     }
     gldlUseProgram_impl( program );
+	BindProgram( program );
 }
-
 void gldlUniform1f ( GLint location, GLfloat v0, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform1f( %d, %s );\n", file, line, location,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform1f( %d, %f );\n", file, line, location,  (float)v0 );
 
     DebugTest( 418 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glUniform1f( location=%d, v0=%s ) at %s:%d\n", debug_break, location, arg1, file, line );
+        printf( "Breakpoint %s on glUniform1f( location=%d, v0=%f ) at %s:%d\n", debug_break, location, (float)v0, file, line );
         DebugFunction();
     }
     gldlUniform1f_impl( location, v0 );
 }
-
 void gldlUniform2f ( GLint location, GLfloat v0, GLfloat v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform2f( %d, %s, %s );\n", file, line, location, arg1,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform2f( %d, %f, %f );\n", file, line, location, (float)v0,  (float)v1 );
 
     DebugTest( 426 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glUniform2f( location=%d, v0=%s, v1=%s ) at %s:%d\n", debug_break, location, arg1, arg2, file, line );
+        printf( "Breakpoint %s on glUniform2f( location=%d, v0=%f, v1=%f ) at %s:%d\n", debug_break, location, (float)v0, (float)v1, file, line );
         DebugFunction();
     }
     gldlUniform2f_impl( location, v0, v1 );
 }
-
 void gldlUniform3f ( GLint location, GLfloat v0, GLfloat v1, GLfloat v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform3f( %d, %s, %s, %s );\n", file, line, location, arg1, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform3f( %d, %f, %f, %f );\n", file, line, location, (float)v0, (float)v1,  (float)v2 );
 
     DebugTest( 434 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glUniform3f( location=%d, v0=%s, v1=%s, v2=%s ) at %s:%d\n", debug_break, location, arg1, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glUniform3f( location=%d, v0=%f, v1=%f, v2=%f ) at %s:%d\n", debug_break, location, (float)v0, (float)v1, (float)v2, file, line );
         DebugFunction();
     }
     gldlUniform3f_impl( location, v0, v1, v2 );
 }
-
 void gldlUniform4f ( GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform4f( %d, %s, %s, %s, %s );\n", file, line, location, arg1, arg2, arg3,  arg4 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform4f( %d, %f, %f, %f, %f );\n", file, line, location, (float)v0, (float)v1, (float)v2,  (float)v3 );
 
     DebugTest( 442 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glUniform4f( location=%d, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", debug_break, location, arg1, arg2, arg3, arg4, file, line );
+        printf( "Breakpoint %s on glUniform4f( location=%d, v0=%f, v1=%f, v2=%f, v3=%f ) at %s:%d\n", debug_break, location, (float)v0, (float)v1, (float)v2, (float)v3, file, line );
         DebugFunction();
     }
     gldlUniform4f_impl( location, v0, v1, v2, v3 );
 }
-
 void gldlUniform1i ( GLint location, GLint v0, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4381,7 +4684,6 @@ void gldlUniform1i ( GLint location, GLint v0, const char *arg0, const char *arg
     }
     gldlUniform1i_impl( location, v0 );
 }
-
 void gldlUniform2i ( GLint location, GLint v0, GLint v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4395,7 +4697,6 @@ void gldlUniform2i ( GLint location, GLint v0, GLint v1, const char *arg0, const
     }
     gldlUniform2i_impl( location, v0, v1 );
 }
-
 void gldlUniform3i ( GLint location, GLint v0, GLint v1, GLint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4409,7 +4710,6 @@ void gldlUniform3i ( GLint location, GLint v0, GLint v1, GLint v2, const char *a
     }
     gldlUniform3i_impl( location, v0, v1, v2 );
 }
-
 void gldlUniform4i ( GLint location, GLint v0, GLint v1, GLint v2, GLint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4423,7 +4723,6 @@ void gldlUniform4i ( GLint location, GLint v0, GLint v1, GLint v2, GLint v3, con
     }
     gldlUniform4i_impl( location, v0, v1, v2, v3 );
 }
-
 void gldlUniform1fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4437,7 +4736,6 @@ void gldlUniform1fv ( GLint location, GLsizei count, const GLfloat *value, const
     }
     gldlUniform1fv_impl( location, count, value );
 }
-
 void gldlUniform2fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4451,7 +4749,6 @@ void gldlUniform2fv ( GLint location, GLsizei count, const GLfloat *value, const
     }
     gldlUniform2fv_impl( location, count, value );
 }
-
 void gldlUniform3fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4465,7 +4762,6 @@ void gldlUniform3fv ( GLint location, GLsizei count, const GLfloat *value, const
     }
     gldlUniform3fv_impl( location, count, value );
 }
-
 void gldlUniform4fv ( GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4479,7 +4775,6 @@ void gldlUniform4fv ( GLint location, GLsizei count, const GLfloat *value, const
     }
     gldlUniform4fv_impl( location, count, value );
 }
-
 void gldlUniform1iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4493,7 +4788,6 @@ void gldlUniform1iv ( GLint location, GLsizei count, const GLint *value, const c
     }
     gldlUniform1iv_impl( location, count, value );
 }
-
 void gldlUniform2iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4507,7 +4801,6 @@ void gldlUniform2iv ( GLint location, GLsizei count, const GLint *value, const c
     }
     gldlUniform2iv_impl( location, count, value );
 }
-
 void gldlUniform3iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4521,7 +4814,6 @@ void gldlUniform3iv ( GLint location, GLsizei count, const GLint *value, const c
     }
     gldlUniform3iv_impl( location, count, value );
 }
-
 void gldlUniform4iv ( GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4535,7 +4827,6 @@ void gldlUniform4iv ( GLint location, GLsizei count, const GLint *value, const c
     }
     gldlUniform4iv_impl( location, count, value );
 }
-
 void gldlUniformMatrix2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4549,7 +4840,6 @@ void gldlUniformMatrix2fv ( GLint location, GLsizei count, GLboolean transpose, 
     }
     gldlUniformMatrix2fv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4563,7 +4853,6 @@ void gldlUniformMatrix3fv ( GLint location, GLsizei count, GLboolean transpose, 
     }
     gldlUniformMatrix3fv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4577,7 +4866,6 @@ void gldlUniformMatrix4fv ( GLint location, GLsizei count, GLboolean transpose, 
     }
     gldlUniformMatrix4fv_impl( location, count, transpose, value );
 }
-
 void gldlValidateProgram ( GLuint program, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4591,21 +4879,19 @@ void gldlValidateProgram ( GLuint program, const char *arg0, const char *file, i
     }
     gldlValidateProgram_impl( program );
 }
-
 void gldlVertexAttrib1d ( GLuint index, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib1d( %d, %s );\n", file, line, index,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib1d( %d, %f );\n", file, line, index,  (float)x );
 
     DebugTest( 473 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttrib1d( index=%d, x=%s ) at %s:%d\n", debug_break, index, arg1, file, line );
+        printf( "Breakpoint %s on glVertexAttrib1d( index=%d, x=%f ) at %s:%d\n", debug_break, index, (float)x, file, line );
         DebugFunction();
     }
     gldlVertexAttrib1d_impl( index, x );
 }
-
 void gldlVertexAttrib1dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4619,21 +4905,19 @@ void gldlVertexAttrib1dv ( GLuint index, const GLdouble *v, const char *arg0, co
     }
     gldlVertexAttrib1dv_impl( index, v );
 }
-
 void gldlVertexAttrib1f ( GLuint index, GLfloat x, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib1f( %d, %s );\n", file, line, index,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib1f( %d, %f );\n", file, line, index,  (float)x );
 
     DebugTest( 475 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttrib1f( index=%d, x=%s ) at %s:%d\n", debug_break, index, arg1, file, line );
+        printf( "Breakpoint %s on glVertexAttrib1f( index=%d, x=%f ) at %s:%d\n", debug_break, index, (float)x, file, line );
         DebugFunction();
     }
     gldlVertexAttrib1f_impl( index, x );
 }
-
 void gldlVertexAttrib1fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4647,7 +4931,6 @@ void gldlVertexAttrib1fv ( GLuint index, const GLfloat *v, const char *arg0, con
     }
     gldlVertexAttrib1fv_impl( index, v );
 }
-
 void gldlVertexAttrib1s ( GLuint index, GLshort x, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4661,7 +4944,6 @@ void gldlVertexAttrib1s ( GLuint index, GLshort x, const char *arg0, const char 
     }
     gldlVertexAttrib1s_impl( index, x );
 }
-
 void gldlVertexAttrib1sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4675,21 +4957,19 @@ void gldlVertexAttrib1sv ( GLuint index, const GLshort *v, const char *arg0, con
     }
     gldlVertexAttrib1sv_impl( index, v );
 }
-
 void gldlVertexAttrib2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib2d( %d, %s, %s );\n", file, line, index, arg1,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib2d( %d, %f, %f );\n", file, line, index, (float)x,  (float)y );
 
     DebugTest( 479 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttrib2d( index=%d, x=%s, y=%s ) at %s:%d\n", debug_break, index, arg1, arg2, file, line );
+        printf( "Breakpoint %s on glVertexAttrib2d( index=%d, x=%f, y=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, file, line );
         DebugFunction();
     }
     gldlVertexAttrib2d_impl( index, x, y );
 }
-
 void gldlVertexAttrib2dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4703,21 +4983,19 @@ void gldlVertexAttrib2dv ( GLuint index, const GLdouble *v, const char *arg0, co
     }
     gldlVertexAttrib2dv_impl( index, v );
 }
-
 void gldlVertexAttrib2f ( GLuint index, GLfloat x, GLfloat y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib2f( %d, %s, %s );\n", file, line, index, arg1,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib2f( %d, %f, %f );\n", file, line, index, (float)x,  (float)y );
 
     DebugTest( 481 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttrib2f( index=%d, x=%s, y=%s ) at %s:%d\n", debug_break, index, arg1, arg2, file, line );
+        printf( "Breakpoint %s on glVertexAttrib2f( index=%d, x=%f, y=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, file, line );
         DebugFunction();
     }
     gldlVertexAttrib2f_impl( index, x, y );
 }
-
 void gldlVertexAttrib2fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4731,7 +5009,6 @@ void gldlVertexAttrib2fv ( GLuint index, const GLfloat *v, const char *arg0, con
     }
     gldlVertexAttrib2fv_impl( index, v );
 }
-
 void gldlVertexAttrib2s ( GLuint index, GLshort x, GLshort y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4745,7 +5022,6 @@ void gldlVertexAttrib2s ( GLuint index, GLshort x, GLshort y, const char *arg0, 
     }
     gldlVertexAttrib2s_impl( index, x, y );
 }
-
 void gldlVertexAttrib2sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4759,21 +5035,19 @@ void gldlVertexAttrib2sv ( GLuint index, const GLshort *v, const char *arg0, con
     }
     gldlVertexAttrib2sv_impl( index, v );
 }
-
 void gldlVertexAttrib3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib3d( %d, %s, %s, %s );\n", file, line, index, arg1, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib3d( %d, %f, %f, %f );\n", file, line, index, (float)x, (float)y,  (float)z );
 
     DebugTest( 485 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttrib3d( index=%d, x=%s, y=%s, z=%s ) at %s:%d\n", debug_break, index, arg1, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glVertexAttrib3d( index=%d, x=%f, y=%f, z=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, (float)z, file, line );
         DebugFunction();
     }
     gldlVertexAttrib3d_impl( index, x, y, z );
 }
-
 void gldlVertexAttrib3dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4787,21 +5061,19 @@ void gldlVertexAttrib3dv ( GLuint index, const GLdouble *v, const char *arg0, co
     }
     gldlVertexAttrib3dv_impl( index, v );
 }
-
 void gldlVertexAttrib3f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib3f( %d, %s, %s, %s );\n", file, line, index, arg1, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib3f( %d, %f, %f, %f );\n", file, line, index, (float)x, (float)y,  (float)z );
 
     DebugTest( 487 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttrib3f( index=%d, x=%s, y=%s, z=%s ) at %s:%d\n", debug_break, index, arg1, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glVertexAttrib3f( index=%d, x=%f, y=%f, z=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, (float)z, file, line );
         DebugFunction();
     }
     gldlVertexAttrib3f_impl( index, x, y, z );
 }
-
 void gldlVertexAttrib3fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4815,7 +5087,6 @@ void gldlVertexAttrib3fv ( GLuint index, const GLfloat *v, const char *arg0, con
     }
     gldlVertexAttrib3fv_impl( index, v );
 }
-
 void gldlVertexAttrib3s ( GLuint index, GLshort x, GLshort y, GLshort z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4829,7 +5100,6 @@ void gldlVertexAttrib3s ( GLuint index, GLshort x, GLshort y, GLshort z, const c
     }
     gldlVertexAttrib3s_impl( index, x, y, z );
 }
-
 void gldlVertexAttrib3sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4843,7 +5113,6 @@ void gldlVertexAttrib3sv ( GLuint index, const GLshort *v, const char *arg0, con
     }
     gldlVertexAttrib3sv_impl( index, v );
 }
-
 void gldlVertexAttrib4Nbv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4857,7 +5126,6 @@ void gldlVertexAttrib4Nbv ( GLuint index, const GLbyte *v, const char *arg0, con
     }
     gldlVertexAttrib4Nbv_impl( index, v );
 }
-
 void gldlVertexAttrib4Niv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4871,7 +5139,6 @@ void gldlVertexAttrib4Niv ( GLuint index, const GLint *v, const char *arg0, cons
     }
     gldlVertexAttrib4Niv_impl( index, v );
 }
-
 void gldlVertexAttrib4Nsv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4885,7 +5152,6 @@ void gldlVertexAttrib4Nsv ( GLuint index, const GLshort *v, const char *arg0, co
     }
     gldlVertexAttrib4Nsv_impl( index, v );
 }
-
 void gldlVertexAttrib4Nub ( GLuint index, GLubyte x, GLubyte y, GLubyte z, GLubyte w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4899,7 +5165,6 @@ void gldlVertexAttrib4Nub ( GLuint index, GLubyte x, GLubyte y, GLubyte z, GLuby
     }
     gldlVertexAttrib4Nub_impl( index, x, y, z, w );
 }
-
 void gldlVertexAttrib4Nubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4913,7 +5178,6 @@ void gldlVertexAttrib4Nubv ( GLuint index, const GLubyte *v, const char *arg0, c
     }
     gldlVertexAttrib4Nubv_impl( index, v );
 }
-
 void gldlVertexAttrib4Nuiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4927,7 +5191,6 @@ void gldlVertexAttrib4Nuiv ( GLuint index, const GLuint *v, const char *arg0, co
     }
     gldlVertexAttrib4Nuiv_impl( index, v );
 }
-
 void gldlVertexAttrib4Nusv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4941,7 +5204,6 @@ void gldlVertexAttrib4Nusv ( GLuint index, const GLushort *v, const char *arg0, 
     }
     gldlVertexAttrib4Nusv_impl( index, v );
 }
-
 void gldlVertexAttrib4bv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4955,21 +5217,19 @@ void gldlVertexAttrib4bv ( GLuint index, const GLbyte *v, const char *arg0, cons
     }
     gldlVertexAttrib4bv_impl( index, v );
 }
-
 void gldlVertexAttrib4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib4d( %d, %s, %s, %s, %s );\n", file, line, index, arg1, arg2, arg3,  arg4 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib4d( %d, %f, %f, %f, %f );\n", file, line, index, (float)x, (float)y, (float)z,  (float)w );
 
     DebugTest( 499 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttrib4d( index=%d, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", debug_break, index, arg1, arg2, arg3, arg4, file, line );
+        printf( "Breakpoint %s on glVertexAttrib4d( index=%d, x=%f, y=%f, z=%f, w=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, (float)z, (float)w, file, line );
         DebugFunction();
     }
     gldlVertexAttrib4d_impl( index, x, y, z, w );
 }
-
 void gldlVertexAttrib4dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -4983,21 +5243,19 @@ void gldlVertexAttrib4dv ( GLuint index, const GLdouble *v, const char *arg0, co
     }
     gldlVertexAttrib4dv_impl( index, v );
 }
-
 void gldlVertexAttrib4f ( GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib4f( %d, %s, %s, %s, %s );\n", file, line, index, arg1, arg2, arg3,  arg4 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttrib4f( %d, %f, %f, %f, %f );\n", file, line, index, (float)x, (float)y, (float)z,  (float)w );
 
     DebugTest( 501 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttrib4f( index=%d, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", debug_break, index, arg1, arg2, arg3, arg4, file, line );
+        printf( "Breakpoint %s on glVertexAttrib4f( index=%d, x=%f, y=%f, z=%f, w=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, (float)z, (float)w, file, line );
         DebugFunction();
     }
     gldlVertexAttrib4f_impl( index, x, y, z, w );
 }
-
 void gldlVertexAttrib4fv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5011,7 +5269,6 @@ void gldlVertexAttrib4fv ( GLuint index, const GLfloat *v, const char *arg0, con
     }
     gldlVertexAttrib4fv_impl( index, v );
 }
-
 void gldlVertexAttrib4iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5025,7 +5282,6 @@ void gldlVertexAttrib4iv ( GLuint index, const GLint *v, const char *arg0, const
     }
     gldlVertexAttrib4iv_impl( index, v );
 }
-
 void gldlVertexAttrib4s ( GLuint index, GLshort x, GLshort y, GLshort z, GLshort w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5039,7 +5295,6 @@ void gldlVertexAttrib4s ( GLuint index, GLshort x, GLshort y, GLshort z, GLshort
     }
     gldlVertexAttrib4s_impl( index, x, y, z, w );
 }
-
 void gldlVertexAttrib4sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5053,7 +5308,6 @@ void gldlVertexAttrib4sv ( GLuint index, const GLshort *v, const char *arg0, con
     }
     gldlVertexAttrib4sv_impl( index, v );
 }
-
 void gldlVertexAttrib4ubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5067,7 +5321,6 @@ void gldlVertexAttrib4ubv ( GLuint index, const GLubyte *v, const char *arg0, co
     }
     gldlVertexAttrib4ubv_impl( index, v );
 }
-
 void gldlVertexAttrib4uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5081,7 +5334,6 @@ void gldlVertexAttrib4uiv ( GLuint index, const GLuint *v, const char *arg0, con
     }
     gldlVertexAttrib4uiv_impl( index, v );
 }
-
 void gldlVertexAttrib4usv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5095,7 +5347,6 @@ void gldlVertexAttrib4usv ( GLuint index, const GLushort *v, const char *arg0, c
     }
     gldlVertexAttrib4usv_impl( index, v );
 }
-
 void gldlVertexAttribPointer ( GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5109,7 +5360,6 @@ void gldlVertexAttribPointer ( GLuint index, GLint size, GLenum type, GLboolean 
     }
     gldlVertexAttribPointer_impl( index, size, type, normalized, stride, pointer );
 }
-
 void gldlUniformMatrix2x3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5123,7 +5373,6 @@ void gldlUniformMatrix2x3fv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix2x3fv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix3x2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5137,7 +5386,6 @@ void gldlUniformMatrix3x2fv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix3x2fv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix2x4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5151,7 +5399,6 @@ void gldlUniformMatrix2x4fv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix2x4fv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix4x2fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5165,7 +5412,6 @@ void gldlUniformMatrix4x2fv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix4x2fv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix3x4fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5179,7 +5425,6 @@ void gldlUniformMatrix3x4fv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix3x4fv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix4x3fv ( GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5193,7 +5438,6 @@ void gldlUniformMatrix4x3fv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix4x3fv_impl( location, count, transpose, value );
 }
-
 void gldlColorMaski ( GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboolean a, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5207,7 +5451,6 @@ void gldlColorMaski ( GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboo
     }
     gldlColorMaski_impl( index, r, g, b, a );
 }
-
 void gldlGetBooleani_v ( GLenum target, GLuint index, GLboolean *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5221,7 +5464,6 @@ void gldlGetBooleani_v ( GLenum target, GLuint index, GLboolean *data, const cha
     }
     gldlGetBooleani_v_impl( target, index, data );
 }
-
 void gldlGetIntegeri_v ( GLenum target, GLuint index, GLint *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5235,7 +5477,6 @@ void gldlGetIntegeri_v ( GLenum target, GLuint index, GLint *data, const char *a
     }
     gldlGetIntegeri_v_impl( target, index, data );
 }
-
 void gldlEnablei ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5249,7 +5490,6 @@ void gldlEnablei ( GLenum target, GLuint index, const char *arg0, const char *ar
     }
     gldlEnablei_impl( target, index );
 }
-
 void gldlDisablei ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5263,7 +5503,6 @@ void gldlDisablei ( GLenum target, GLuint index, const char *arg0, const char *a
     }
     gldlDisablei_impl( target, index );
 }
-
 GLboolean gldlIsEnabledi ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5275,9 +5514,9 @@ GLboolean gldlIsEnabledi ( GLenum target, GLuint index, const char *arg0, const 
         printf( "Breakpoint %s on glIsEnabledi( target=%s, index=%d ) at %s:%d\n", debug_break, arg0, index, file, line );
         DebugFunction();
     }
-    return gldlIsEnabledi_impl( target, index );
+    GLboolean ret = gldlIsEnabledi_impl( target, index );
+	return ret;
 }
-
 void gldlBeginTransformFeedback ( GLenum primitiveMode, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5291,7 +5530,6 @@ void gldlBeginTransformFeedback ( GLenum primitiveMode, const char *arg0, const 
     }
     gldlBeginTransformFeedback_impl( primitiveMode );
 }
-
 void gldlEndTransformFeedback ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5306,7 +5544,6 @@ void gldlEndTransformFeedback ( const char *file, int line ) {
     }
     gldlEndTransformFeedback_impl(  );
 }
-
 void gldlBindBufferRange ( GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5320,7 +5557,6 @@ void gldlBindBufferRange ( GLenum target, GLuint index, GLuint buffer, GLintptr 
     }
     gldlBindBufferRange_impl( target, index, buffer, offset, size );
 }
-
 void gldlBindBufferBase ( GLenum target, GLuint index, GLuint buffer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5334,7 +5570,6 @@ void gldlBindBufferBase ( GLenum target, GLuint index, GLuint buffer, const char
     }
     gldlBindBufferBase_impl( target, index, buffer );
 }
-
 void gldlTransformFeedbackVaryings ( GLuint program, GLsizei count, const GLchar* *varyings, GLenum bufferMode, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5348,7 +5583,6 @@ void gldlTransformFeedbackVaryings ( GLuint program, GLsizei count, const GLchar
     }
     gldlTransformFeedbackVaryings_impl( program, count, varyings, bufferMode );
 }
-
 void gldlGetTransformFeedbackVarying ( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5362,7 +5596,6 @@ void gldlGetTransformFeedbackVarying ( GLuint program, GLuint index, GLsizei buf
     }
     gldlGetTransformFeedbackVarying_impl( program, index, bufSize, length, size, type, name );
 }
-
 void gldlClampColor ( GLenum target, GLenum clamp, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5376,7 +5609,6 @@ void gldlClampColor ( GLenum target, GLenum clamp, const char *arg0, const char 
     }
     gldlClampColor_impl( target, clamp );
 }
-
 void gldlBeginConditionalRender ( GLuint id, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5390,7 +5622,6 @@ void gldlBeginConditionalRender ( GLuint id, GLenum mode, const char *arg0, cons
     }
     gldlBeginConditionalRender_impl( id, mode );
 }
-
 void gldlEndConditionalRender ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5405,7 +5636,6 @@ void gldlEndConditionalRender ( const char *file, int line ) {
     }
     gldlEndConditionalRender_impl(  );
 }
-
 void gldlVertexAttribIPointer ( GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5419,7 +5649,6 @@ void gldlVertexAttribIPointer ( GLuint index, GLint size, GLenum type, GLsizei s
     }
     gldlVertexAttribIPointer_impl( index, size, type, stride, pointer );
 }
-
 void gldlGetVertexAttribIiv ( GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5433,7 +5662,6 @@ void gldlGetVertexAttribIiv ( GLuint index, GLenum pname, GLint *params, const c
     }
     gldlGetVertexAttribIiv_impl( index, pname, params );
 }
-
 void gldlGetVertexAttribIuiv ( GLuint index, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5447,7 +5675,6 @@ void gldlGetVertexAttribIuiv ( GLuint index, GLenum pname, GLuint *params, const
     }
     gldlGetVertexAttribIuiv_impl( index, pname, params );
 }
-
 void gldlVertexAttribI1i ( GLuint index, GLint x, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5461,7 +5688,6 @@ void gldlVertexAttribI1i ( GLuint index, GLint x, const char *arg0, const char *
     }
     gldlVertexAttribI1i_impl( index, x );
 }
-
 void gldlVertexAttribI2i ( GLuint index, GLint x, GLint y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5475,7 +5701,6 @@ void gldlVertexAttribI2i ( GLuint index, GLint x, GLint y, const char *arg0, con
     }
     gldlVertexAttribI2i_impl( index, x, y );
 }
-
 void gldlVertexAttribI3i ( GLuint index, GLint x, GLint y, GLint z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5489,7 +5714,6 @@ void gldlVertexAttribI3i ( GLuint index, GLint x, GLint y, GLint z, const char *
     }
     gldlVertexAttribI3i_impl( index, x, y, z );
 }
-
 void gldlVertexAttribI4i ( GLuint index, GLint x, GLint y, GLint z, GLint w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5503,7 +5727,6 @@ void gldlVertexAttribI4i ( GLuint index, GLint x, GLint y, GLint z, GLint w, con
     }
     gldlVertexAttribI4i_impl( index, x, y, z, w );
 }
-
 void gldlVertexAttribI1ui ( GLuint index, GLuint x, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5517,7 +5740,6 @@ void gldlVertexAttribI1ui ( GLuint index, GLuint x, const char *arg0, const char
     }
     gldlVertexAttribI1ui_impl( index, x );
 }
-
 void gldlVertexAttribI2ui ( GLuint index, GLuint x, GLuint y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5531,7 +5753,6 @@ void gldlVertexAttribI2ui ( GLuint index, GLuint x, GLuint y, const char *arg0, 
     }
     gldlVertexAttribI2ui_impl( index, x, y );
 }
-
 void gldlVertexAttribI3ui ( GLuint index, GLuint x, GLuint y, GLuint z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5545,7 +5766,6 @@ void gldlVertexAttribI3ui ( GLuint index, GLuint x, GLuint y, GLuint z, const ch
     }
     gldlVertexAttribI3ui_impl( index, x, y, z );
 }
-
 void gldlVertexAttribI4ui ( GLuint index, GLuint x, GLuint y, GLuint z, GLuint w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5559,7 +5779,6 @@ void gldlVertexAttribI4ui ( GLuint index, GLuint x, GLuint y, GLuint z, GLuint w
     }
     gldlVertexAttribI4ui_impl( index, x, y, z, w );
 }
-
 void gldlVertexAttribI1iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5573,7 +5792,6 @@ void gldlVertexAttribI1iv ( GLuint index, const GLint *v, const char *arg0, cons
     }
     gldlVertexAttribI1iv_impl( index, v );
 }
-
 void gldlVertexAttribI2iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5587,7 +5805,6 @@ void gldlVertexAttribI2iv ( GLuint index, const GLint *v, const char *arg0, cons
     }
     gldlVertexAttribI2iv_impl( index, v );
 }
-
 void gldlVertexAttribI3iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5601,7 +5818,6 @@ void gldlVertexAttribI3iv ( GLuint index, const GLint *v, const char *arg0, cons
     }
     gldlVertexAttribI3iv_impl( index, v );
 }
-
 void gldlVertexAttribI4iv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5615,7 +5831,6 @@ void gldlVertexAttribI4iv ( GLuint index, const GLint *v, const char *arg0, cons
     }
     gldlVertexAttribI4iv_impl( index, v );
 }
-
 void gldlVertexAttribI1uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5629,7 +5844,6 @@ void gldlVertexAttribI1uiv ( GLuint index, const GLuint *v, const char *arg0, co
     }
     gldlVertexAttribI1uiv_impl( index, v );
 }
-
 void gldlVertexAttribI2uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5643,7 +5857,6 @@ void gldlVertexAttribI2uiv ( GLuint index, const GLuint *v, const char *arg0, co
     }
     gldlVertexAttribI2uiv_impl( index, v );
 }
-
 void gldlVertexAttribI3uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5657,7 +5870,6 @@ void gldlVertexAttribI3uiv ( GLuint index, const GLuint *v, const char *arg0, co
     }
     gldlVertexAttribI3uiv_impl( index, v );
 }
-
 void gldlVertexAttribI4uiv ( GLuint index, const GLuint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5671,7 +5883,6 @@ void gldlVertexAttribI4uiv ( GLuint index, const GLuint *v, const char *arg0, co
     }
     gldlVertexAttribI4uiv_impl( index, v );
 }
-
 void gldlVertexAttribI4bv ( GLuint index, const GLbyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5685,7 +5896,6 @@ void gldlVertexAttribI4bv ( GLuint index, const GLbyte *v, const char *arg0, con
     }
     gldlVertexAttribI4bv_impl( index, v );
 }
-
 void gldlVertexAttribI4sv ( GLuint index, const GLshort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5699,7 +5909,6 @@ void gldlVertexAttribI4sv ( GLuint index, const GLshort *v, const char *arg0, co
     }
     gldlVertexAttribI4sv_impl( index, v );
 }
-
 void gldlVertexAttribI4ubv ( GLuint index, const GLubyte *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5713,7 +5922,6 @@ void gldlVertexAttribI4ubv ( GLuint index, const GLubyte *v, const char *arg0, c
     }
     gldlVertexAttribI4ubv_impl( index, v );
 }
-
 void gldlVertexAttribI4usv ( GLuint index, const GLushort *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5727,7 +5935,6 @@ void gldlVertexAttribI4usv ( GLuint index, const GLushort *v, const char *arg0, 
     }
     gldlVertexAttribI4usv_impl( index, v );
 }
-
 void gldlGetUniformuiv ( GLuint program, GLint location, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5741,7 +5948,6 @@ void gldlGetUniformuiv ( GLuint program, GLint location, GLuint *params, const c
     }
     gldlGetUniformuiv_impl( program, location, params );
 }
-
 void gldlBindFragDataLocation ( GLuint program, GLuint color, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5755,7 +5961,6 @@ void gldlBindFragDataLocation ( GLuint program, GLuint color, const GLchar *name
     }
     gldlBindFragDataLocation_impl( program, color, name );
 }
-
 GLint gldlGetFragDataLocation ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5767,9 +5972,9 @@ GLint gldlGetFragDataLocation ( GLuint program, const GLchar *name, const char *
         printf( "Breakpoint %s on glGetFragDataLocation( program=%d, name=%s ) at %s:%d\n", debug_break, program, arg1, file, line );
         DebugFunction();
     }
-    return gldlGetFragDataLocation_impl( program, name );
+    GLint ret = gldlGetFragDataLocation_impl( program, name );
+	return ret;
 }
-
 void gldlUniform1ui ( GLint location, GLuint v0, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5783,7 +5988,6 @@ void gldlUniform1ui ( GLint location, GLuint v0, const char *arg0, const char *a
     }
     gldlUniform1ui_impl( location, v0 );
 }
-
 void gldlUniform2ui ( GLint location, GLuint v0, GLuint v1, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5797,7 +6001,6 @@ void gldlUniform2ui ( GLint location, GLuint v0, GLuint v1, const char *arg0, co
     }
     gldlUniform2ui_impl( location, v0, v1 );
 }
-
 void gldlUniform3ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5811,7 +6014,6 @@ void gldlUniform3ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, const cha
     }
     gldlUniform3ui_impl( location, v0, v1, v2 );
 }
-
 void gldlUniform4ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5825,7 +6027,6 @@ void gldlUniform4ui ( GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3
     }
     gldlUniform4ui_impl( location, v0, v1, v2, v3 );
 }
-
 void gldlUniform1uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5839,7 +6040,6 @@ void gldlUniform1uiv ( GLint location, GLsizei count, const GLuint *value, const
     }
     gldlUniform1uiv_impl( location, count, value );
 }
-
 void gldlUniform2uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5853,7 +6053,6 @@ void gldlUniform2uiv ( GLint location, GLsizei count, const GLuint *value, const
     }
     gldlUniform2uiv_impl( location, count, value );
 }
-
 void gldlUniform3uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5867,7 +6066,6 @@ void gldlUniform3uiv ( GLint location, GLsizei count, const GLuint *value, const
     }
     gldlUniform3uiv_impl( location, count, value );
 }
-
 void gldlUniform4uiv ( GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5881,7 +6079,6 @@ void gldlUniform4uiv ( GLint location, GLsizei count, const GLuint *value, const
     }
     gldlUniform4uiv_impl( location, count, value );
 }
-
 void gldlTexParameterIiv ( GLenum target, GLenum pname, const GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5895,7 +6092,6 @@ void gldlTexParameterIiv ( GLenum target, GLenum pname, const GLint *params, con
     }
     gldlTexParameterIiv_impl( target, pname, params );
 }
-
 void gldlTexParameterIuiv ( GLenum target, GLenum pname, const GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5909,7 +6105,6 @@ void gldlTexParameterIuiv ( GLenum target, GLenum pname, const GLuint *params, c
     }
     gldlTexParameterIuiv_impl( target, pname, params );
 }
-
 void gldlGetTexParameterIiv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5923,7 +6118,6 @@ void gldlGetTexParameterIiv ( GLenum target, GLenum pname, GLint *params, const 
     }
     gldlGetTexParameterIiv_impl( target, pname, params );
 }
-
 void gldlGetTexParameterIuiv ( GLenum target, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5937,7 +6131,6 @@ void gldlGetTexParameterIuiv ( GLenum target, GLenum pname, GLuint *params, cons
     }
     gldlGetTexParameterIuiv_impl( target, pname, params );
 }
-
 void gldlClearBufferiv ( GLenum buffer, GLint drawbuffer, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5951,7 +6144,6 @@ void gldlClearBufferiv ( GLenum buffer, GLint drawbuffer, const GLint *value, co
     }
     gldlClearBufferiv_impl( buffer, drawbuffer, value );
 }
-
 void gldlClearBufferuiv ( GLenum buffer, GLint drawbuffer, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5965,7 +6157,6 @@ void gldlClearBufferuiv ( GLenum buffer, GLint drawbuffer, const GLuint *value, 
     }
     gldlClearBufferuiv_impl( buffer, drawbuffer, value );
 }
-
 void gldlClearBufferfv ( GLenum buffer, GLint drawbuffer, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -5979,21 +6170,19 @@ void gldlClearBufferfv ( GLenum buffer, GLint drawbuffer, const GLfloat *value, 
     }
     gldlClearBufferfv_impl( buffer, drawbuffer, value );
 }
-
 void gldlClearBufferfi ( GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glClearBufferfi( %s, %d, %s, %d );\n", file, line, arg0, drawbuffer, arg2,  stencil );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glClearBufferfi( %s, %d, %f, %d );\n", file, line, arg0, drawbuffer, (float)depth,  stencil );
 
     DebugTest( 40 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glClearBufferfi( buffer=%s, drawbuffer=%d, depth=%s, stencil=%d ) at %s:%d\n", debug_break, arg0, drawbuffer, arg2, stencil, file, line );
+        printf( "Breakpoint %s on glClearBufferfi( buffer=%s, drawbuffer=%d, depth=%f, stencil=%d ) at %s:%d\n", debug_break, arg0, drawbuffer, (float)depth, stencil, file, line );
         DebugFunction();
     }
     gldlClearBufferfi_impl( buffer, drawbuffer, depth, stencil );
 }
-
 const GLubyte * gldlGetStringi ( GLenum name, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6005,9 +6194,9 @@ const GLubyte * gldlGetStringi ( GLenum name, GLuint index, const char *arg0, co
         printf( "Breakpoint %s on glGetStringi( name=%s, index=%d ) at %s:%d\n", debug_break, arg0, index, file, line );
         DebugFunction();
     }
-    return gldlGetStringi_impl( name, index );
+    const GLubyte * ret = gldlGetStringi_impl( name, index );
+	return ret;
 }
-
 void gldlDrawArraysInstanced ( GLenum mode, GLint first, GLsizei count, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6021,7 +6210,6 @@ void gldlDrawArraysInstanced ( GLenum mode, GLint first, GLsizei count, GLsizei 
     }
     gldlDrawArraysInstanced_impl( mode, first, count, primcount );
 }
-
 void gldlDrawElementsInstanced ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6035,7 +6223,6 @@ void gldlDrawElementsInstanced ( GLenum mode, GLsizei count, GLenum type, const 
     }
     gldlDrawElementsInstanced_impl( mode, count, type, indices, primcount );
 }
-
 void gldlTexBuffer ( GLenum target, GLenum internalformat, GLuint buffer, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6049,7 +6236,6 @@ void gldlTexBuffer ( GLenum target, GLenum internalformat, GLuint buffer, const 
     }
     gldlTexBuffer_impl( target, internalformat, buffer );
 }
-
 void gldlPrimitiveRestartIndex ( GLuint index, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6063,7 +6249,6 @@ void gldlPrimitiveRestartIndex ( GLuint index, const char *arg0, const char *fil
     }
     gldlPrimitiveRestartIndex_impl( index );
 }
-
 void gldlGetInteger64i_v ( GLenum target, GLuint index, GLint64 *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6077,7 +6262,6 @@ void gldlGetInteger64i_v ( GLenum target, GLuint index, GLint64 *data, const cha
     }
     gldlGetInteger64i_v_impl( target, index, data );
 }
-
 void gldlGetBufferParameteri64v ( GLenum target, GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6091,7 +6275,6 @@ void gldlGetBufferParameteri64v ( GLenum target, GLenum pname, GLint64 *params, 
     }
     gldlGetBufferParameteri64v_impl( target, pname, params );
 }
-
 void gldlFramebufferTexture ( GLenum target, GLenum attachment, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6105,7 +6288,6 @@ void gldlFramebufferTexture ( GLenum target, GLenum attachment, GLuint texture, 
     }
     gldlFramebufferTexture_impl( target, attachment, texture, level );
 }
-
 void gldlVertexAttribDivisor ( GLuint index, GLuint divisor, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6119,21 +6301,19 @@ void gldlVertexAttribDivisor ( GLuint index, GLuint divisor, const char *arg0, c
     }
     gldlVertexAttribDivisor_impl( index, divisor );
 }
-
 void gldlMinSampleShading ( GLclampf value, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glMinSampleShading( %s );\n", file, line,  arg0 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glMinSampleShading( %f );\n", file, line,  (float)value );
 
     DebugTest( 274 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glMinSampleShading( value=%s ) at %s:%d\n", debug_break, arg0, file, line );
+        printf( "Breakpoint %s on glMinSampleShading( value=%f ) at %s:%d\n", debug_break, (float)value, file, line );
         DebugFunction();
     }
     gldlMinSampleShading_impl( value );
 }
-
 void gldlBlendEquationi ( GLuint buf, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6147,7 +6327,6 @@ void gldlBlendEquationi ( GLuint buf, GLenum mode, const char *arg0, const char 
     }
     gldlBlendEquationi_impl( buf, mode );
 }
-
 void gldlBlendEquationSeparatei ( GLuint buf, GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6161,7 +6340,6 @@ void gldlBlendEquationSeparatei ( GLuint buf, GLenum modeRGB, GLenum modeAlpha, 
     }
     gldlBlendEquationSeparatei_impl( buf, modeRGB, modeAlpha );
 }
-
 void gldlBlendFunci ( GLuint buf, GLenum src, GLenum dst, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6175,7 +6353,6 @@ void gldlBlendFunci ( GLuint buf, GLenum src, GLenum dst, const char *arg0, cons
     }
     gldlBlendFunci_impl( buf, src, dst );
 }
-
 void gldlBlendFuncSeparatei ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6189,7 +6366,6 @@ void gldlBlendFuncSeparatei ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum s
     }
     gldlBlendFuncSeparatei_impl( buf, srcRGB, dstRGB, srcAlpha, dstAlpha );
 }
-
 GLboolean gldlIsRenderbuffer ( GLuint renderbuffer, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6201,9 +6377,9 @@ GLboolean gldlIsRenderbuffer ( GLuint renderbuffer, const char *arg0, const char
         printf( "Breakpoint %s on glIsRenderbuffer( renderbuffer=%d ) at %s:%d\n", debug_break, renderbuffer, file, line );
         DebugFunction();
     }
-    return gldlIsRenderbuffer_impl( renderbuffer );
+    GLboolean ret = gldlIsRenderbuffer_impl( renderbuffer );
+	return ret;
 }
-
 void gldlBindRenderbuffer ( GLenum target, GLuint renderbuffer, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6217,7 +6393,6 @@ void gldlBindRenderbuffer ( GLenum target, GLuint renderbuffer, const char *arg0
     }
     gldlBindRenderbuffer_impl( target, renderbuffer );
 }
-
 void gldlDeleteRenderbuffers ( GLsizei n, const GLuint *renderbuffers, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6231,7 +6406,6 @@ void gldlDeleteRenderbuffers ( GLsizei n, const GLuint *renderbuffers, const cha
     }
     gldlDeleteRenderbuffers_impl( n, renderbuffers );
 }
-
 void gldlGenRenderbuffers ( GLsizei n, GLuint *renderbuffers, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6245,7 +6419,6 @@ void gldlGenRenderbuffers ( GLsizei n, GLuint *renderbuffers, const char *arg0, 
     }
     gldlGenRenderbuffers_impl( n, renderbuffers );
 }
-
 void gldlRenderbufferStorage ( GLenum target, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6259,7 +6432,6 @@ void gldlRenderbufferStorage ( GLenum target, GLenum internalformat, GLsizei wid
     }
     gldlRenderbufferStorage_impl( target, internalformat, width, height );
 }
-
 void gldlGetRenderbufferParameteriv ( GLenum target, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6273,7 +6445,6 @@ void gldlGetRenderbufferParameteriv ( GLenum target, GLenum pname, GLint *params
     }
     gldlGetRenderbufferParameteriv_impl( target, pname, params );
 }
-
 GLboolean gldlIsFramebuffer ( GLuint framebuffer, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6285,9 +6456,9 @@ GLboolean gldlIsFramebuffer ( GLuint framebuffer, const char *arg0, const char *
         printf( "Breakpoint %s on glIsFramebuffer( framebuffer=%d ) at %s:%d\n", debug_break, framebuffer, file, line );
         DebugFunction();
     }
-    return gldlIsFramebuffer_impl( framebuffer );
+    GLboolean ret = gldlIsFramebuffer_impl( framebuffer );
+	return ret;
 }
-
 void gldlBindFramebuffer ( GLenum target, GLuint framebuffer, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6301,7 +6472,6 @@ void gldlBindFramebuffer ( GLenum target, GLuint framebuffer, const char *arg0, 
     }
     gldlBindFramebuffer_impl( target, framebuffer );
 }
-
 void gldlDeleteFramebuffers ( GLsizei n, const GLuint *framebuffers, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6315,7 +6485,6 @@ void gldlDeleteFramebuffers ( GLsizei n, const GLuint *framebuffers, const char 
     }
     gldlDeleteFramebuffers_impl( n, framebuffers );
 }
-
 void gldlGenFramebuffers ( GLsizei n, GLuint *framebuffers, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6329,7 +6498,6 @@ void gldlGenFramebuffers ( GLsizei n, GLuint *framebuffers, const char *arg0, co
     }
     gldlGenFramebuffers_impl( n, framebuffers );
 }
-
 GLenum gldlCheckFramebufferStatus ( GLenum target, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6341,9 +6509,9 @@ GLenum gldlCheckFramebufferStatus ( GLenum target, const char *arg0, const char 
         printf( "Breakpoint %s on glCheckFramebufferStatus( target=%s ) at %s:%d\n", debug_break, arg0, file, line );
         DebugFunction();
     }
-    return gldlCheckFramebufferStatus_impl( target );
+    GLenum ret = gldlCheckFramebufferStatus_impl( target );
+	return ret;
 }
-
 void gldlFramebufferTexture1D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6357,7 +6525,6 @@ void gldlFramebufferTexture1D ( GLenum target, GLenum attachment, GLenum textarg
     }
     gldlFramebufferTexture1D_impl( target, attachment, textarget, texture, level );
 }
-
 void gldlFramebufferTexture2D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6371,7 +6538,6 @@ void gldlFramebufferTexture2D ( GLenum target, GLenum attachment, GLenum textarg
     }
     gldlFramebufferTexture2D_impl( target, attachment, textarget, texture, level );
 }
-
 void gldlFramebufferTexture3D ( GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, GLint zoffset, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6385,7 +6551,6 @@ void gldlFramebufferTexture3D ( GLenum target, GLenum attachment, GLenum textarg
     }
     gldlFramebufferTexture3D_impl( target, attachment, textarget, texture, level, zoffset );
 }
-
 void gldlFramebufferRenderbuffer ( GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6399,7 +6564,6 @@ void gldlFramebufferRenderbuffer ( GLenum target, GLenum attachment, GLenum rend
     }
     gldlFramebufferRenderbuffer_impl( target, attachment, renderbuffertarget, renderbuffer );
 }
-
 void gldlGetFramebufferAttachmentParameteriv ( GLenum target, GLenum attachment, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6413,7 +6577,6 @@ void gldlGetFramebufferAttachmentParameteriv ( GLenum target, GLenum attachment,
     }
     gldlGetFramebufferAttachmentParameteriv_impl( target, attachment, pname, params );
 }
-
 void gldlGenerateMipmap ( GLenum target, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6427,7 +6590,6 @@ void gldlGenerateMipmap ( GLenum target, const char *arg0, const char *file, int
     }
     gldlGenerateMipmap_impl( target );
 }
-
 void gldlBlitFramebuffer ( GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *arg8, const char *arg9, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6441,7 +6603,6 @@ void gldlBlitFramebuffer ( GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, G
     }
     gldlBlitFramebuffer_impl( srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter );
 }
-
 void gldlRenderbufferStorageMultisample ( GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6455,7 +6616,6 @@ void gldlRenderbufferStorageMultisample ( GLenum target, GLsizei samples, GLenum
     }
     gldlRenderbufferStorageMultisample_impl( target, samples, internalformat, width, height );
 }
-
 void gldlFramebufferTextureLayer ( GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6469,7 +6629,6 @@ void gldlFramebufferTextureLayer ( GLenum target, GLenum attachment, GLuint text
     }
     gldlFramebufferTextureLayer_impl( target, attachment, texture, level, layer );
 }
-
 GLvoid* gldlMapBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6481,9 +6640,9 @@ GLvoid* gldlMapBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, 
         printf( "Breakpoint %s on glMapBufferRange( target=%s, offset=%d, length=%d, access=%s ) at %s:%d\n", debug_break, arg0, (int)offset, (int)length, arg3, file, line );
         DebugFunction();
     }
-    return gldlMapBufferRange_impl( target, offset, length, access );
+    GLvoid* ret = gldlMapBufferRange_impl( target, offset, length, access );
+	return ret;
 }
-
 void gldlFlushMappedBufferRange ( GLenum target, GLintptr offset, GLsizeiptr length, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6497,7 +6656,6 @@ void gldlFlushMappedBufferRange ( GLenum target, GLintptr offset, GLsizeiptr len
     }
     gldlFlushMappedBufferRange_impl( target, offset, length );
 }
-
 void gldlBindVertexArray ( GLuint array, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6511,7 +6669,6 @@ void gldlBindVertexArray ( GLuint array, const char *arg0, const char *file, int
     }
     gldlBindVertexArray_impl( array );
 }
-
 void gldlDeleteVertexArrays ( GLsizei n, const GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6525,7 +6682,6 @@ void gldlDeleteVertexArrays ( GLsizei n, const GLuint *arrays, const char *arg0,
     }
     gldlDeleteVertexArrays_impl( n, arrays );
 }
-
 void gldlGenVertexArrays ( GLsizei n, GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6539,7 +6695,6 @@ void gldlGenVertexArrays ( GLsizei n, GLuint *arrays, const char *arg0, const ch
     }
     gldlGenVertexArrays_impl( n, arrays );
 }
-
 GLboolean gldlIsVertexArray ( GLuint array, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6551,9 +6706,9 @@ GLboolean gldlIsVertexArray ( GLuint array, const char *arg0, const char *file, 
         printf( "Breakpoint %s on glIsVertexArray( array=%d ) at %s:%d\n", debug_break, array, file, line );
         DebugFunction();
     }
-    return gldlIsVertexArray_impl( array );
+    GLboolean ret = gldlIsVertexArray_impl( array );
+	return ret;
 }
-
 void gldlGetUniformIndices ( GLuint program, GLsizei uniformCount, const GLchar* *uniformNames, GLuint *uniformIndices, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6567,7 +6722,6 @@ void gldlGetUniformIndices ( GLuint program, GLsizei uniformCount, const GLchar*
     }
     gldlGetUniformIndices_impl( program, uniformCount, uniformNames, uniformIndices );
 }
-
 void gldlGetActiveUniformsiv ( GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6581,7 +6735,6 @@ void gldlGetActiveUniformsiv ( GLuint program, GLsizei uniformCount, const GLuin
     }
     gldlGetActiveUniformsiv_impl( program, uniformCount, uniformIndices, pname, params );
 }
-
 void gldlGetActiveUniformName ( GLuint program, GLuint uniformIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformName, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6595,7 +6748,6 @@ void gldlGetActiveUniformName ( GLuint program, GLuint uniformIndex, GLsizei buf
     }
     gldlGetActiveUniformName_impl( program, uniformIndex, bufSize, length, uniformName );
 }
-
 GLuint gldlGetUniformBlockIndex ( GLuint program, const GLchar *uniformBlockName, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6607,9 +6759,9 @@ GLuint gldlGetUniformBlockIndex ( GLuint program, const GLchar *uniformBlockName
         printf( "Breakpoint %s on glGetUniformBlockIndex( program=%d, uniformBlockName=%s ) at %s:%d\n", debug_break, program, arg1, file, line );
         DebugFunction();
     }
-    return gldlGetUniformBlockIndex_impl( program, uniformBlockName );
+    GLuint ret = gldlGetUniformBlockIndex_impl( program, uniformBlockName );
+	return ret;
 }
-
 void gldlGetActiveUniformBlockiv ( GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6623,7 +6775,6 @@ void gldlGetActiveUniformBlockiv ( GLuint program, GLuint uniformBlockIndex, GLe
     }
     gldlGetActiveUniformBlockiv_impl( program, uniformBlockIndex, pname, params );
 }
-
 void gldlGetActiveUniformBlockName ( GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6637,7 +6788,6 @@ void gldlGetActiveUniformBlockName ( GLuint program, GLuint uniformBlockIndex, G
     }
     gldlGetActiveUniformBlockName_impl( program, uniformBlockIndex, bufSize, length, uniformBlockName );
 }
-
 void gldlUniformBlockBinding ( GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6651,7 +6801,6 @@ void gldlUniformBlockBinding ( GLuint program, GLuint uniformBlockIndex, GLuint 
     }
     gldlUniformBlockBinding_impl( program, uniformBlockIndex, uniformBlockBinding );
 }
-
 void gldlCopyBufferSubData ( GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6665,7 +6814,6 @@ void gldlCopyBufferSubData ( GLenum readTarget, GLenum writeTarget, GLintptr rea
     }
     gldlCopyBufferSubData_impl( readTarget, writeTarget, readOffset, writeOffset, size );
 }
-
 void gldlDrawElementsBaseVertex ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6679,7 +6827,6 @@ void gldlDrawElementsBaseVertex ( GLenum mode, GLsizei count, GLenum type, const
     }
     gldlDrawElementsBaseVertex_impl( mode, count, type, indices, basevertex );
 }
-
 void gldlDrawRangeElementsBaseVertex ( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6693,7 +6840,6 @@ void gldlDrawRangeElementsBaseVertex ( GLenum mode, GLuint start, GLuint end, GL
     }
     gldlDrawRangeElementsBaseVertex_impl( mode, start, end, count, type, indices, basevertex );
 }
-
 void gldlDrawElementsInstancedBaseVertex ( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei primcount, GLint basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6707,7 +6853,6 @@ void gldlDrawElementsInstancedBaseVertex ( GLenum mode, GLsizei count, GLenum ty
     }
     gldlDrawElementsInstancedBaseVertex_impl( mode, count, type, indices, primcount, basevertex );
 }
-
 void gldlMultiDrawElementsBaseVertex ( GLenum mode, const GLsizei *count, GLenum type, const GLvoid* *indices, GLsizei primcount, const GLint *basevertex, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6721,7 +6866,6 @@ void gldlMultiDrawElementsBaseVertex ( GLenum mode, const GLsizei *count, GLenum
     }
     gldlMultiDrawElementsBaseVertex_impl( mode, count, type, indices, primcount, basevertex );
 }
-
 void gldlProvokingVertex ( GLenum mode, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6735,7 +6879,6 @@ void gldlProvokingVertex ( GLenum mode, const char *arg0, const char *file, int 
     }
     gldlProvokingVertex_impl( mode );
 }
-
 GLsync gldlFenceSync ( GLenum condition, GLbitfield flags, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6747,9 +6890,9 @@ GLsync gldlFenceSync ( GLenum condition, GLbitfield flags, const char *arg0, con
         printf( "Breakpoint %s on glFenceSync( condition=%s, flags=%s ) at %s:%d\n", debug_break, arg0, arg1, file, line );
         DebugFunction();
     }
-    return gldlFenceSync_impl( condition, flags );
+    GLsync ret = gldlFenceSync_impl( condition, flags );
+	return ret;
 }
-
 GLboolean gldlIsSync ( GLsync sync, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6761,9 +6904,9 @@ GLboolean gldlIsSync ( GLsync sync, const char *arg0, const char *file, int line
         printf( "Breakpoint %s on glIsSync( sync=%s ) at %s:%d\n", debug_break, arg0, file, line );
         DebugFunction();
     }
-    return gldlIsSync_impl( sync );
+    GLboolean ret = gldlIsSync_impl( sync );
+	return ret;
 }
-
 void gldlDeleteSync ( GLsync sync, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6777,7 +6920,6 @@ void gldlDeleteSync ( GLsync sync, const char *arg0, const char *file, int line 
     }
     gldlDeleteSync_impl( sync );
 }
-
 GLenum gldlClientWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6789,9 +6931,9 @@ GLenum gldlClientWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, con
         printf( "Breakpoint %s on glClientWaitSync( sync=%s, flags=%s, timeout=%s ) at %s:%d\n", debug_break, arg0, arg1, arg2, file, line );
         DebugFunction();
     }
-    return gldlClientWaitSync_impl( sync, flags, timeout );
+    GLenum ret = gldlClientWaitSync_impl( sync, flags, timeout );
+	return ret;
 }
-
 void gldlWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6805,7 +6947,6 @@ void gldlWaitSync ( GLsync sync, GLbitfield flags, GLuint64 timeout, const char 
     }
     gldlWaitSync_impl( sync, flags, timeout );
 }
-
 void gldlGetInteger64v ( GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6819,7 +6960,6 @@ void gldlGetInteger64v ( GLenum pname, GLint64 *params, const char *arg0, const 
     }
     gldlGetInteger64v_impl( pname, params );
 }
-
 void gldlGetSynciv ( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6833,7 +6973,6 @@ void gldlGetSynciv ( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length
     }
     gldlGetSynciv_impl( sync, pname, bufSize, length, values );
 }
-
 void gldlTexImage2DMultisample ( GLenum target, GLsizei samples, GLint internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6847,7 +6986,6 @@ void gldlTexImage2DMultisample ( GLenum target, GLsizei samples, GLint internalf
     }
     gldlTexImage2DMultisample_impl( target, samples, internalformat, width, height, fixedsamplelocations );
 }
-
 void gldlTexImage3DMultisample ( GLenum target, GLsizei samples, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLboolean fixedsamplelocations, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6861,7 +6999,6 @@ void gldlTexImage3DMultisample ( GLenum target, GLsizei samples, GLint internalf
     }
     gldlTexImage3DMultisample_impl( target, samples, internalformat, width, height, depth, fixedsamplelocations );
 }
-
 void gldlGetMultisamplefv ( GLenum pname, GLuint index, GLfloat *val, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6875,7 +7012,6 @@ void gldlGetMultisamplefv ( GLenum pname, GLuint index, GLfloat *val, const char
     }
     gldlGetMultisamplefv_impl( pname, index, val );
 }
-
 void gldlSampleMaski ( GLuint index, GLbitfield mask, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6889,7 +7025,6 @@ void gldlSampleMaski ( GLuint index, GLbitfield mask, const char *arg0, const ch
     }
     gldlSampleMaski_impl( index, mask );
 }
-
 void gldlBlendEquationiARB ( GLuint buf, GLenum mode, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6903,7 +7038,6 @@ void gldlBlendEquationiARB ( GLuint buf, GLenum mode, const char *arg0, const ch
     }
     gldlBlendEquationiARB_impl( buf, mode );
 }
-
 void gldlBlendEquationSeparateiARB ( GLuint buf, GLenum modeRGB, GLenum modeAlpha, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6917,7 +7051,6 @@ void gldlBlendEquationSeparateiARB ( GLuint buf, GLenum modeRGB, GLenum modeAlph
     }
     gldlBlendEquationSeparateiARB_impl( buf, modeRGB, modeAlpha );
 }
-
 void gldlBlendFunciARB ( GLuint buf, GLenum src, GLenum dst, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6931,7 +7064,6 @@ void gldlBlendFunciARB ( GLuint buf, GLenum src, GLenum dst, const char *arg0, c
     }
     gldlBlendFunciARB_impl( buf, src, dst );
 }
-
 void gldlBlendFuncSeparateiARB ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6945,21 +7077,19 @@ void gldlBlendFuncSeparateiARB ( GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenu
     }
     gldlBlendFuncSeparateiARB_impl( buf, srcRGB, dstRGB, srcAlpha, dstAlpha );
 }
-
 void gldlMinSampleShadingARB ( GLclampf value, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glMinSampleShadingARB( %s );\n", file, line,  arg0 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glMinSampleShadingARB( %f );\n", file, line,  (float)value );
 
     DebugTest( 275 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glMinSampleShadingARB( value=%s ) at %s:%d\n", debug_break, arg0, file, line );
+        printf( "Breakpoint %s on glMinSampleShadingARB( value=%f ) at %s:%d\n", debug_break, (float)value, file, line );
         DebugFunction();
     }
     gldlMinSampleShadingARB_impl( value );
 }
-
 void gldlNamedStringARB ( GLenum type, GLint namelen, const GLchar *name, GLint stringlen, const GLchar *string, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6973,7 +7103,6 @@ void gldlNamedStringARB ( GLenum type, GLint namelen, const GLchar *name, GLint 
     }
     gldlNamedStringARB_impl( type, namelen, name, stringlen, string );
 }
-
 void gldlDeleteNamedStringARB ( GLint namelen, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -6987,7 +7116,6 @@ void gldlDeleteNamedStringARB ( GLint namelen, const GLchar *name, const char *a
     }
     gldlDeleteNamedStringARB_impl( namelen, name );
 }
-
 void gldlCompileShaderIncludeARB ( GLuint shader, GLsizei count, const GLchar* *path, const GLint *length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7001,7 +7129,6 @@ void gldlCompileShaderIncludeARB ( GLuint shader, GLsizei count, const GLchar* *
     }
     gldlCompileShaderIncludeARB_impl( shader, count, path, length );
 }
-
 GLboolean gldlIsNamedStringARB ( GLint namelen, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7013,9 +7140,9 @@ GLboolean gldlIsNamedStringARB ( GLint namelen, const GLchar *name, const char *
         printf( "Breakpoint %s on glIsNamedStringARB( namelen=%d, name=%s ) at %s:%d\n", debug_break, namelen, arg1, file, line );
         DebugFunction();
     }
-    return gldlIsNamedStringARB_impl( namelen, name );
+    GLboolean ret = gldlIsNamedStringARB_impl( namelen, name );
+	return ret;
 }
-
 void gldlGetNamedStringARB ( GLint namelen, const GLchar *name, GLsizei bufSize, GLint *stringlen, GLchar *string, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7029,7 +7156,6 @@ void gldlGetNamedStringARB ( GLint namelen, const GLchar *name, GLsizei bufSize,
     }
     gldlGetNamedStringARB_impl( namelen, name, bufSize, stringlen, string );
 }
-
 void gldlGetNamedStringivARB ( GLint namelen, const GLchar *name, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7043,7 +7169,6 @@ void gldlGetNamedStringivARB ( GLint namelen, const GLchar *name, GLenum pname, 
     }
     gldlGetNamedStringivARB_impl( namelen, name, pname, params );
 }
-
 void gldlBindFragDataLocationIndexed ( GLuint program, GLuint colorNumber, GLuint index, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7057,7 +7182,6 @@ void gldlBindFragDataLocationIndexed ( GLuint program, GLuint colorNumber, GLuin
     }
     gldlBindFragDataLocationIndexed_impl( program, colorNumber, index, name );
 }
-
 GLint gldlGetFragDataIndex ( GLuint program, const GLchar *name, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7069,9 +7193,9 @@ GLint gldlGetFragDataIndex ( GLuint program, const GLchar *name, const char *arg
         printf( "Breakpoint %s on glGetFragDataIndex( program=%d, name=%s ) at %s:%d\n", debug_break, program, arg1, file, line );
         DebugFunction();
     }
-    return gldlGetFragDataIndex_impl( program, name );
+    GLint ret = gldlGetFragDataIndex_impl( program, name );
+	return ret;
 }
-
 void gldlGenSamplers ( GLsizei count, GLuint *samplers, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7085,7 +7209,6 @@ void gldlGenSamplers ( GLsizei count, GLuint *samplers, const char *arg0, const 
     }
     gldlGenSamplers_impl( count, samplers );
 }
-
 void gldlDeleteSamplers ( GLsizei count, const GLuint *samplers, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7099,7 +7222,6 @@ void gldlDeleteSamplers ( GLsizei count, const GLuint *samplers, const char *arg
     }
     gldlDeleteSamplers_impl( count, samplers );
 }
-
 GLboolean gldlIsSampler ( GLuint sampler, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7111,9 +7233,9 @@ GLboolean gldlIsSampler ( GLuint sampler, const char *arg0, const char *file, in
         printf( "Breakpoint %s on glIsSampler( sampler=%d ) at %s:%d\n", debug_break, sampler, file, line );
         DebugFunction();
     }
-    return gldlIsSampler_impl( sampler );
+    GLboolean ret = gldlIsSampler_impl( sampler );
+	return ret;
 }
-
 void gldlBindSampler ( GLuint unit, GLuint sampler, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7127,7 +7249,6 @@ void gldlBindSampler ( GLuint unit, GLuint sampler, const char *arg0, const char
     }
     gldlBindSampler_impl( unit, sampler );
 }
-
 void gldlSamplerParameteri ( GLuint sampler, GLenum pname, GLint param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7141,7 +7262,6 @@ void gldlSamplerParameteri ( GLuint sampler, GLenum pname, GLint param, const ch
     }
     gldlSamplerParameteri_impl( sampler, pname, param );
 }
-
 void gldlSamplerParameteriv ( GLuint sampler, GLenum pname, const GLint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7155,21 +7275,19 @@ void gldlSamplerParameteriv ( GLuint sampler, GLenum pname, const GLint *param, 
     }
     gldlSamplerParameteriv_impl( sampler, pname, param );
 }
-
 void gldlSamplerParameterf ( GLuint sampler, GLenum pname, GLfloat param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glSamplerParameterf( %d, %s, %s );\n", file, line, sampler, arg1,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glSamplerParameterf( %d, %s, %f );\n", file, line, sampler, arg1,  (float)param );
 
     DebugTest( 368 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glSamplerParameterf( sampler=%d, pname=%s, param=%s ) at %s:%d\n", debug_break, sampler, arg1, arg2, file, line );
+        printf( "Breakpoint %s on glSamplerParameterf( sampler=%d, pname=%s, param=%f ) at %s:%d\n", debug_break, sampler, arg1, (float)param, file, line );
         DebugFunction();
     }
     gldlSamplerParameterf_impl( sampler, pname, param );
 }
-
 void gldlSamplerParameterfv ( GLuint sampler, GLenum pname, const GLfloat *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7183,7 +7301,6 @@ void gldlSamplerParameterfv ( GLuint sampler, GLenum pname, const GLfloat *param
     }
     gldlSamplerParameterfv_impl( sampler, pname, param );
 }
-
 void gldlSamplerParameterIiv ( GLuint sampler, GLenum pname, const GLint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7197,7 +7314,6 @@ void gldlSamplerParameterIiv ( GLuint sampler, GLenum pname, const GLint *param,
     }
     gldlSamplerParameterIiv_impl( sampler, pname, param );
 }
-
 void gldlSamplerParameterIuiv ( GLuint sampler, GLenum pname, const GLuint *param, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7211,7 +7327,6 @@ void gldlSamplerParameterIuiv ( GLuint sampler, GLenum pname, const GLuint *para
     }
     gldlSamplerParameterIuiv_impl( sampler, pname, param );
 }
-
 void gldlGetSamplerParameteriv ( GLuint sampler, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7225,7 +7340,6 @@ void gldlGetSamplerParameteriv ( GLuint sampler, GLenum pname, GLint *params, co
     }
     gldlGetSamplerParameteriv_impl( sampler, pname, params );
 }
-
 void gldlGetSamplerParameterIiv ( GLuint sampler, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7239,7 +7353,6 @@ void gldlGetSamplerParameterIiv ( GLuint sampler, GLenum pname, GLint *params, c
     }
     gldlGetSamplerParameterIiv_impl( sampler, pname, params );
 }
-
 void gldlGetSamplerParameterfv ( GLuint sampler, GLenum pname, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7253,7 +7366,6 @@ void gldlGetSamplerParameterfv ( GLuint sampler, GLenum pname, GLfloat *params, 
     }
     gldlGetSamplerParameterfv_impl( sampler, pname, params );
 }
-
 void gldlGetSamplerParameterIuiv ( GLuint sampler, GLenum pname, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7267,7 +7379,6 @@ void gldlGetSamplerParameterIuiv ( GLuint sampler, GLenum pname, GLuint *params,
     }
     gldlGetSamplerParameterIuiv_impl( sampler, pname, params );
 }
-
 void gldlQueryCounter ( GLuint id, GLenum target, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7281,7 +7392,6 @@ void gldlQueryCounter ( GLuint id, GLenum target, const char *arg0, const char *
     }
     gldlQueryCounter_impl( id, target );
 }
-
 void gldlGetQueryObjecti64v ( GLuint id, GLenum pname, GLint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7295,7 +7405,6 @@ void gldlGetQueryObjecti64v ( GLuint id, GLenum pname, GLint64 *params, const ch
     }
     gldlGetQueryObjecti64v_impl( id, pname, params );
 }
-
 void gldlGetQueryObjectui64v ( GLuint id, GLenum pname, GLuint64 *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7309,7 +7418,6 @@ void gldlGetQueryObjectui64v ( GLuint id, GLenum pname, GLuint64 *params, const 
     }
     gldlGetQueryObjectui64v_impl( id, pname, params );
 }
-
 void gldlVertexP2ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7323,7 +7431,6 @@ void gldlVertexP2ui ( GLenum type, GLuint value, const char *arg0, const char *a
     }
     gldlVertexP2ui_impl( type, value );
 }
-
 void gldlVertexP2uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7337,7 +7444,6 @@ void gldlVertexP2uiv ( GLenum type, const GLuint *value, const char *arg0, const
     }
     gldlVertexP2uiv_impl( type, value );
 }
-
 void gldlVertexP3ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7351,7 +7457,6 @@ void gldlVertexP3ui ( GLenum type, GLuint value, const char *arg0, const char *a
     }
     gldlVertexP3ui_impl( type, value );
 }
-
 void gldlVertexP3uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7365,7 +7470,6 @@ void gldlVertexP3uiv ( GLenum type, const GLuint *value, const char *arg0, const
     }
     gldlVertexP3uiv_impl( type, value );
 }
-
 void gldlVertexP4ui ( GLenum type, GLuint value, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7379,7 +7483,6 @@ void gldlVertexP4ui ( GLenum type, GLuint value, const char *arg0, const char *a
     }
     gldlVertexP4ui_impl( type, value );
 }
-
 void gldlVertexP4uiv ( GLenum type, const GLuint *value, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7393,7 +7496,6 @@ void gldlVertexP4uiv ( GLenum type, const GLuint *value, const char *arg0, const
     }
     gldlVertexP4uiv_impl( type, value );
 }
-
 void gldlTexCoordP1ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7407,7 +7509,6 @@ void gldlTexCoordP1ui ( GLenum type, GLuint coords, const char *arg0, const char
     }
     gldlTexCoordP1ui_impl( type, coords );
 }
-
 void gldlTexCoordP1uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7421,7 +7522,6 @@ void gldlTexCoordP1uiv ( GLenum type, const GLuint *coords, const char *arg0, co
     }
     gldlTexCoordP1uiv_impl( type, coords );
 }
-
 void gldlTexCoordP2ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7435,7 +7535,6 @@ void gldlTexCoordP2ui ( GLenum type, GLuint coords, const char *arg0, const char
     }
     gldlTexCoordP2ui_impl( type, coords );
 }
-
 void gldlTexCoordP2uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7449,7 +7548,6 @@ void gldlTexCoordP2uiv ( GLenum type, const GLuint *coords, const char *arg0, co
     }
     gldlTexCoordP2uiv_impl( type, coords );
 }
-
 void gldlTexCoordP3ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7463,7 +7561,6 @@ void gldlTexCoordP3ui ( GLenum type, GLuint coords, const char *arg0, const char
     }
     gldlTexCoordP3ui_impl( type, coords );
 }
-
 void gldlTexCoordP3uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7477,7 +7574,6 @@ void gldlTexCoordP3uiv ( GLenum type, const GLuint *coords, const char *arg0, co
     }
     gldlTexCoordP3uiv_impl( type, coords );
 }
-
 void gldlTexCoordP4ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7491,7 +7587,6 @@ void gldlTexCoordP4ui ( GLenum type, GLuint coords, const char *arg0, const char
     }
     gldlTexCoordP4ui_impl( type, coords );
 }
-
 void gldlTexCoordP4uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7505,7 +7600,6 @@ void gldlTexCoordP4uiv ( GLenum type, const GLuint *coords, const char *arg0, co
     }
     gldlTexCoordP4uiv_impl( type, coords );
 }
-
 void gldlMultiTexCoordP1ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7519,7 +7613,6 @@ void gldlMultiTexCoordP1ui ( GLenum texture, GLenum type, GLuint coords, const c
     }
     gldlMultiTexCoordP1ui_impl( texture, type, coords );
 }
-
 void gldlMultiTexCoordP1uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7533,7 +7626,6 @@ void gldlMultiTexCoordP1uiv ( GLenum texture, GLenum type, const GLuint *coords,
     }
     gldlMultiTexCoordP1uiv_impl( texture, type, coords );
 }
-
 void gldlMultiTexCoordP2ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7547,7 +7639,6 @@ void gldlMultiTexCoordP2ui ( GLenum texture, GLenum type, GLuint coords, const c
     }
     gldlMultiTexCoordP2ui_impl( texture, type, coords );
 }
-
 void gldlMultiTexCoordP2uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7561,7 +7652,6 @@ void gldlMultiTexCoordP2uiv ( GLenum texture, GLenum type, const GLuint *coords,
     }
     gldlMultiTexCoordP2uiv_impl( texture, type, coords );
 }
-
 void gldlMultiTexCoordP3ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7575,7 +7665,6 @@ void gldlMultiTexCoordP3ui ( GLenum texture, GLenum type, GLuint coords, const c
     }
     gldlMultiTexCoordP3ui_impl( texture, type, coords );
 }
-
 void gldlMultiTexCoordP3uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7589,7 +7678,6 @@ void gldlMultiTexCoordP3uiv ( GLenum texture, GLenum type, const GLuint *coords,
     }
     gldlMultiTexCoordP3uiv_impl( texture, type, coords );
 }
-
 void gldlMultiTexCoordP4ui ( GLenum texture, GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7603,7 +7691,6 @@ void gldlMultiTexCoordP4ui ( GLenum texture, GLenum type, GLuint coords, const c
     }
     gldlMultiTexCoordP4ui_impl( texture, type, coords );
 }
-
 void gldlMultiTexCoordP4uiv ( GLenum texture, GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7617,7 +7704,6 @@ void gldlMultiTexCoordP4uiv ( GLenum texture, GLenum type, const GLuint *coords,
     }
     gldlMultiTexCoordP4uiv_impl( texture, type, coords );
 }
-
 void gldlNormalP3ui ( GLenum type, GLuint coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7631,7 +7717,6 @@ void gldlNormalP3ui ( GLenum type, GLuint coords, const char *arg0, const char *
     }
     gldlNormalP3ui_impl( type, coords );
 }
-
 void gldlNormalP3uiv ( GLenum type, const GLuint *coords, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7645,7 +7730,6 @@ void gldlNormalP3uiv ( GLenum type, const GLuint *coords, const char *arg0, cons
     }
     gldlNormalP3uiv_impl( type, coords );
 }
-
 void gldlColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7659,7 +7743,6 @@ void gldlColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *ar
     }
     gldlColorP3ui_impl( type, color );
 }
-
 void gldlColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7673,7 +7756,6 @@ void gldlColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const 
     }
     gldlColorP3uiv_impl( type, color );
 }
-
 void gldlColorP4ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7687,7 +7769,6 @@ void gldlColorP4ui ( GLenum type, GLuint color, const char *arg0, const char *ar
     }
     gldlColorP4ui_impl( type, color );
 }
-
 void gldlColorP4uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7701,7 +7782,6 @@ void gldlColorP4uiv ( GLenum type, const GLuint *color, const char *arg0, const 
     }
     gldlColorP4uiv_impl( type, color );
 }
-
 void gldlSecondaryColorP3ui ( GLenum type, GLuint color, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7715,7 +7795,6 @@ void gldlSecondaryColorP3ui ( GLenum type, GLuint color, const char *arg0, const
     }
     gldlSecondaryColorP3ui_impl( type, color );
 }
-
 void gldlSecondaryColorP3uiv ( GLenum type, const GLuint *color, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7729,7 +7808,6 @@ void gldlSecondaryColorP3uiv ( GLenum type, const GLuint *color, const char *arg
     }
     gldlSecondaryColorP3uiv_impl( type, color );
 }
-
 void gldlVertexAttribP1ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7743,7 +7821,6 @@ void gldlVertexAttribP1ui ( GLuint index, GLenum type, GLboolean normalized, GLu
     }
     gldlVertexAttribP1ui_impl( index, type, normalized, value );
 }
-
 void gldlVertexAttribP1uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7757,7 +7834,6 @@ void gldlVertexAttribP1uiv ( GLuint index, GLenum type, GLboolean normalized, co
     }
     gldlVertexAttribP1uiv_impl( index, type, normalized, value );
 }
-
 void gldlVertexAttribP2ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7771,7 +7847,6 @@ void gldlVertexAttribP2ui ( GLuint index, GLenum type, GLboolean normalized, GLu
     }
     gldlVertexAttribP2ui_impl( index, type, normalized, value );
 }
-
 void gldlVertexAttribP2uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7785,7 +7860,6 @@ void gldlVertexAttribP2uiv ( GLuint index, GLenum type, GLboolean normalized, co
     }
     gldlVertexAttribP2uiv_impl( index, type, normalized, value );
 }
-
 void gldlVertexAttribP3ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7799,7 +7873,6 @@ void gldlVertexAttribP3ui ( GLuint index, GLenum type, GLboolean normalized, GLu
     }
     gldlVertexAttribP3ui_impl( index, type, normalized, value );
 }
-
 void gldlVertexAttribP3uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7813,7 +7886,6 @@ void gldlVertexAttribP3uiv ( GLuint index, GLenum type, GLboolean normalized, co
     }
     gldlVertexAttribP3uiv_impl( index, type, normalized, value );
 }
-
 void gldlVertexAttribP4ui ( GLuint index, GLenum type, GLboolean normalized, GLuint value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7827,7 +7899,6 @@ void gldlVertexAttribP4ui ( GLuint index, GLenum type, GLboolean normalized, GLu
     }
     gldlVertexAttribP4ui_impl( index, type, normalized, value );
 }
-
 void gldlVertexAttribP4uiv ( GLuint index, GLenum type, GLboolean normalized, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7841,7 +7912,6 @@ void gldlVertexAttribP4uiv ( GLuint index, GLenum type, GLboolean normalized, co
     }
     gldlVertexAttribP4uiv_impl( index, type, normalized, value );
 }
-
 void gldlDrawArraysIndirect ( GLenum mode, const GLvoid *indirect, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7855,7 +7925,6 @@ void gldlDrawArraysIndirect ( GLenum mode, const GLvoid *indirect, const char *a
     }
     gldlDrawArraysIndirect_impl( mode, indirect );
 }
-
 void gldlDrawElementsIndirect ( GLenum mode, GLenum type, const GLvoid *indirect, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7869,63 +7938,58 @@ void gldlDrawElementsIndirect ( GLenum mode, GLenum type, const GLvoid *indirect
     }
     gldlDrawElementsIndirect_impl( mode, type, indirect );
 }
-
 void gldlUniform1d ( GLint location, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform1d( %d, %s );\n", file, line, location,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform1d( %d, %f );\n", file, line, location,  (float)x );
 
     DebugTest( 416 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glUniform1d( location=%d, x=%s ) at %s:%d\n", debug_break, location, arg1, file, line );
+        printf( "Breakpoint %s on glUniform1d( location=%d, x=%f ) at %s:%d\n", debug_break, location, (float)x, file, line );
         DebugFunction();
     }
     gldlUniform1d_impl( location, x );
 }
-
 void gldlUniform2d ( GLint location, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform2d( %d, %s, %s );\n", file, line, location, arg1,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform2d( %d, %f, %f );\n", file, line, location, (float)x,  (float)y );
 
     DebugTest( 424 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glUniform2d( location=%d, x=%s, y=%s ) at %s:%d\n", debug_break, location, arg1, arg2, file, line );
+        printf( "Breakpoint %s on glUniform2d( location=%d, x=%f, y=%f ) at %s:%d\n", debug_break, location, (float)x, (float)y, file, line );
         DebugFunction();
     }
     gldlUniform2d_impl( location, x, y );
 }
-
 void gldlUniform3d ( GLint location, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform3d( %d, %s, %s, %s );\n", file, line, location, arg1, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform3d( %d, %f, %f, %f );\n", file, line, location, (float)x, (float)y,  (float)z );
 
     DebugTest( 432 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glUniform3d( location=%d, x=%s, y=%s, z=%s ) at %s:%d\n", debug_break, location, arg1, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glUniform3d( location=%d, x=%f, y=%f, z=%f ) at %s:%d\n", debug_break, location, (float)x, (float)y, (float)z, file, line );
         DebugFunction();
     }
     gldlUniform3d_impl( location, x, y, z );
 }
-
 void gldlUniform4d ( GLint location, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform4d( %d, %s, %s, %s, %s );\n", file, line, location, arg1, arg2, arg3,  arg4 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glUniform4d( %d, %f, %f, %f, %f );\n", file, line, location, (float)x, (float)y, (float)z,  (float)w );
 
     DebugTest( 440 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glUniform4d( location=%d, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", debug_break, location, arg1, arg2, arg3, arg4, file, line );
+        printf( "Breakpoint %s on glUniform4d( location=%d, x=%f, y=%f, z=%f, w=%f ) at %s:%d\n", debug_break, location, (float)x, (float)y, (float)z, (float)w, file, line );
         DebugFunction();
     }
     gldlUniform4d_impl( location, x, y, z, w );
 }
-
 void gldlUniform1dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7939,7 +8003,6 @@ void gldlUniform1dv ( GLint location, GLsizei count, const GLdouble *value, cons
     }
     gldlUniform1dv_impl( location, count, value );
 }
-
 void gldlUniform2dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7953,7 +8016,6 @@ void gldlUniform2dv ( GLint location, GLsizei count, const GLdouble *value, cons
     }
     gldlUniform2dv_impl( location, count, value );
 }
-
 void gldlUniform3dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7967,7 +8029,6 @@ void gldlUniform3dv ( GLint location, GLsizei count, const GLdouble *value, cons
     }
     gldlUniform3dv_impl( location, count, value );
 }
-
 void gldlUniform4dv ( GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7981,7 +8042,6 @@ void gldlUniform4dv ( GLint location, GLsizei count, const GLdouble *value, cons
     }
     gldlUniform4dv_impl( location, count, value );
 }
-
 void gldlUniformMatrix2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -7995,7 +8055,6 @@ void gldlUniformMatrix2dv ( GLint location, GLsizei count, GLboolean transpose, 
     }
     gldlUniformMatrix2dv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8009,7 +8068,6 @@ void gldlUniformMatrix3dv ( GLint location, GLsizei count, GLboolean transpose, 
     }
     gldlUniformMatrix3dv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8023,7 +8081,6 @@ void gldlUniformMatrix4dv ( GLint location, GLsizei count, GLboolean transpose, 
     }
     gldlUniformMatrix4dv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix2x3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8037,7 +8094,6 @@ void gldlUniformMatrix2x3dv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix2x3dv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix2x4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8051,7 +8107,6 @@ void gldlUniformMatrix2x4dv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix2x4dv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix3x2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8065,7 +8120,6 @@ void gldlUniformMatrix3x2dv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix3x2dv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix3x4dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8079,7 +8133,6 @@ void gldlUniformMatrix3x4dv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix3x4dv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix4x2dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8093,7 +8146,6 @@ void gldlUniformMatrix4x2dv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix4x2dv_impl( location, count, transpose, value );
 }
-
 void gldlUniformMatrix4x3dv ( GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8107,7 +8159,6 @@ void gldlUniformMatrix4x3dv ( GLint location, GLsizei count, GLboolean transpose
     }
     gldlUniformMatrix4x3dv_impl( location, count, transpose, value );
 }
-
 void gldlGetUniformdv ( GLuint program, GLint location, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8121,7 +8172,6 @@ void gldlGetUniformdv ( GLuint program, GLint location, GLdouble *params, const 
     }
     gldlGetUniformdv_impl( program, location, params );
 }
-
 GLint gldlGetSubroutineUniformLocation ( GLuint program, GLenum shadertype, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8133,9 +8183,9 @@ GLint gldlGetSubroutineUniformLocation ( GLuint program, GLenum shadertype, cons
         printf( "Breakpoint %s on glGetSubroutineUniformLocation( program=%d, shadertype=%s, name=%s ) at %s:%d\n", debug_break, program, arg1, arg2, file, line );
         DebugFunction();
     }
-    return gldlGetSubroutineUniformLocation_impl( program, shadertype, name );
+    GLint ret = gldlGetSubroutineUniformLocation_impl( program, shadertype, name );
+	return ret;
 }
-
 GLuint gldlGetSubroutineIndex ( GLuint program, GLenum shadertype, const GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8147,9 +8197,9 @@ GLuint gldlGetSubroutineIndex ( GLuint program, GLenum shadertype, const GLchar 
         printf( "Breakpoint %s on glGetSubroutineIndex( program=%d, shadertype=%s, name=%s ) at %s:%d\n", debug_break, program, arg1, arg2, file, line );
         DebugFunction();
     }
-    return gldlGetSubroutineIndex_impl( program, shadertype, name );
+    GLuint ret = gldlGetSubroutineIndex_impl( program, shadertype, name );
+	return ret;
 }
-
 void gldlGetActiveSubroutineUniformiv ( GLuint program, GLenum shadertype, GLuint index, GLenum pname, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8163,7 +8213,6 @@ void gldlGetActiveSubroutineUniformiv ( GLuint program, GLenum shadertype, GLuin
     }
     gldlGetActiveSubroutineUniformiv_impl( program, shadertype, index, pname, values );
 }
-
 void gldlGetActiveSubroutineUniformName ( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8177,7 +8226,6 @@ void gldlGetActiveSubroutineUniformName ( GLuint program, GLenum shadertype, GLu
     }
     gldlGetActiveSubroutineUniformName_impl( program, shadertype, index, bufsize, length, name );
 }
-
 void gldlGetActiveSubroutineName ( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8191,7 +8239,6 @@ void gldlGetActiveSubroutineName ( GLuint program, GLenum shadertype, GLuint ind
     }
     gldlGetActiveSubroutineName_impl( program, shadertype, index, bufsize, length, name );
 }
-
 void gldlUniformSubroutinesuiv ( GLenum shadertype, GLsizei count, const GLuint *indices, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8205,7 +8252,6 @@ void gldlUniformSubroutinesuiv ( GLenum shadertype, GLsizei count, const GLuint 
     }
     gldlUniformSubroutinesuiv_impl( shadertype, count, indices );
 }
-
 void gldlGetUniformSubroutineuiv ( GLenum shadertype, GLint location, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8219,7 +8265,6 @@ void gldlGetUniformSubroutineuiv ( GLenum shadertype, GLint location, GLuint *pa
     }
     gldlGetUniformSubroutineuiv_impl( shadertype, location, params );
 }
-
 void gldlGetProgramStageiv ( GLuint program, GLenum shadertype, GLenum pname, GLint *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8233,7 +8278,6 @@ void gldlGetProgramStageiv ( GLuint program, GLenum shadertype, GLenum pname, GL
     }
     gldlGetProgramStageiv_impl( program, shadertype, pname, values );
 }
-
 void gldlPatchParameteri ( GLenum pname, GLint value, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8247,7 +8291,6 @@ void gldlPatchParameteri ( GLenum pname, GLint value, const char *arg0, const ch
     }
     gldlPatchParameteri_impl( pname, value );
 }
-
 void gldlPatchParameterfv ( GLenum pname, const GLfloat *values, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8261,7 +8304,6 @@ void gldlPatchParameterfv ( GLenum pname, const GLfloat *values, const char *arg
     }
     gldlPatchParameterfv_impl( pname, values );
 }
-
 void gldlBindTransformFeedback ( GLenum target, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8275,7 +8317,6 @@ void gldlBindTransformFeedback ( GLenum target, GLuint id, const char *arg0, con
     }
     gldlBindTransformFeedback_impl( target, id );
 }
-
 void gldlDeleteTransformFeedbacks ( GLsizei n, const GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8289,7 +8330,6 @@ void gldlDeleteTransformFeedbacks ( GLsizei n, const GLuint *ids, const char *ar
     }
     gldlDeleteTransformFeedbacks_impl( n, ids );
 }
-
 void gldlGenTransformFeedbacks ( GLsizei n, GLuint *ids, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8303,7 +8343,6 @@ void gldlGenTransformFeedbacks ( GLsizei n, GLuint *ids, const char *arg0, const
     }
     gldlGenTransformFeedbacks_impl( n, ids );
 }
-
 GLboolean gldlIsTransformFeedback ( GLuint id, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8315,9 +8354,9 @@ GLboolean gldlIsTransformFeedback ( GLuint id, const char *arg0, const char *fil
         printf( "Breakpoint %s on glIsTransformFeedback( id=%d ) at %s:%d\n", debug_break, id, file, line );
         DebugFunction();
     }
-    return gldlIsTransformFeedback_impl( id );
+    GLboolean ret = gldlIsTransformFeedback_impl( id );
+	return ret;
 }
-
 void gldlPauseTransformFeedback ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8332,7 +8371,6 @@ void gldlPauseTransformFeedback ( const char *file, int line ) {
     }
     gldlPauseTransformFeedback_impl(  );
 }
-
 void gldlResumeTransformFeedback ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8347,7 +8385,6 @@ void gldlResumeTransformFeedback ( const char *file, int line ) {
     }
     gldlResumeTransformFeedback_impl(  );
 }
-
 void gldlDrawTransformFeedback ( GLenum mode, GLuint id, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8361,7 +8398,6 @@ void gldlDrawTransformFeedback ( GLenum mode, GLuint id, const char *arg0, const
     }
     gldlDrawTransformFeedback_impl( mode, id );
 }
-
 void gldlDrawTransformFeedbackStream ( GLenum mode, GLuint id, GLuint stream, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8375,7 +8411,6 @@ void gldlDrawTransformFeedbackStream ( GLenum mode, GLuint id, GLuint stream, co
     }
     gldlDrawTransformFeedbackStream_impl( mode, id, stream );
 }
-
 void gldlBeginQueryIndexed ( GLenum target, GLuint index, GLuint id, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8389,7 +8424,6 @@ void gldlBeginQueryIndexed ( GLenum target, GLuint index, GLuint id, const char 
     }
     gldlBeginQueryIndexed_impl( target, index, id );
 }
-
 void gldlEndQueryIndexed ( GLenum target, GLuint index, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8403,7 +8437,6 @@ void gldlEndQueryIndexed ( GLenum target, GLuint index, const char *arg0, const 
     }
     gldlEndQueryIndexed_impl( target, index );
 }
-
 void gldlGetQueryIndexediv ( GLenum target, GLuint index, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8417,7 +8450,6 @@ void gldlGetQueryIndexediv ( GLenum target, GLuint index, GLenum pname, GLint *p
     }
     gldlGetQueryIndexediv_impl( target, index, pname, params );
 }
-
 void gldlReleaseShaderCompiler ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8432,7 +8464,6 @@ void gldlReleaseShaderCompiler ( const char *file, int line ) {
     }
     gldlReleaseShaderCompiler_impl(  );
 }
-
 void gldlShaderBinary ( GLsizei count, const GLuint *shaders, GLenum binaryformat, const GLvoid *binary, GLsizei length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8446,7 +8477,6 @@ void gldlShaderBinary ( GLsizei count, const GLuint *shaders, GLenum binaryforma
     }
     gldlShaderBinary_impl( count, shaders, binaryformat, binary, length );
 }
-
 void gldlGetShaderPrecisionFormat ( GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8460,35 +8490,32 @@ void gldlGetShaderPrecisionFormat ( GLenum shadertype, GLenum precisiontype, GLi
     }
     gldlGetShaderPrecisionFormat_impl( shadertype, precisiontype, range, precision );
 }
-
 void gldlDepthRangef ( GLclampf n, GLclampf f, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glDepthRangef( %s, %s );\n", file, line, arg0,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glDepthRangef( %f, %f );\n", file, line, (float)n,  (float)f );
 
     DebugTest( 95 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glDepthRangef( n=%s, f=%s ) at %s:%d\n", debug_break, arg0, arg1, file, line );
+        printf( "Breakpoint %s on glDepthRangef( n=%f, f=%f ) at %s:%d\n", debug_break, (float)n, (float)f, file, line );
         DebugFunction();
     }
     gldlDepthRangef_impl( n, f );
 }
-
 void gldlClearDepthf ( GLclampf d, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glClearDepthf( %s );\n", file, line,  arg0 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glClearDepthf( %f );\n", file, line,  (float)d );
 
     DebugTest( 46 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glClearDepthf( d=%s ) at %s:%d\n", debug_break, arg0, file, line );
+        printf( "Breakpoint %s on glClearDepthf( d=%f ) at %s:%d\n", debug_break, (float)d, file, line );
         DebugFunction();
     }
     gldlClearDepthf_impl( d );
 }
-
 void gldlGetProgramBinary ( GLuint program, GLsizei bufSize, GLsizei *length, GLenum *binaryFormat, GLvoid *binary, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8502,7 +8529,6 @@ void gldlGetProgramBinary ( GLuint program, GLsizei bufSize, GLsizei *length, GL
     }
     gldlGetProgramBinary_impl( program, bufSize, length, binaryFormat, binary );
 }
-
 void gldlProgramBinary ( GLuint program, GLenum binaryFormat, const GLvoid *binary, GLsizei length, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8516,7 +8542,6 @@ void gldlProgramBinary ( GLuint program, GLenum binaryFormat, const GLvoid *bina
     }
     gldlProgramBinary_impl( program, binaryFormat, binary, length );
 }
-
 void gldlProgramParameteri ( GLuint program, GLenum pname, GLint value, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8530,7 +8555,6 @@ void gldlProgramParameteri ( GLuint program, GLenum pname, GLint value, const ch
     }
     gldlProgramParameteri_impl( program, pname, value );
 }
-
 void gldlUseProgramStages ( GLuint pipeline, GLbitfield stages, GLuint program, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8544,7 +8568,6 @@ void gldlUseProgramStages ( GLuint pipeline, GLbitfield stages, GLuint program, 
     }
     gldlUseProgramStages_impl( pipeline, stages, program );
 }
-
 void gldlActiveShaderProgram ( GLuint pipeline, GLuint program, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8558,7 +8581,6 @@ void gldlActiveShaderProgram ( GLuint pipeline, GLuint program, const char *arg0
     }
     gldlActiveShaderProgram_impl( pipeline, program );
 }
-
 GLuint gldlCreateShaderProgramv ( GLenum type, GLsizei count, const GLchar* *strings, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8570,9 +8592,9 @@ GLuint gldlCreateShaderProgramv ( GLenum type, GLsizei count, const GLchar* *str
         printf( "Breakpoint %s on glCreateShaderProgramv( type=%s, count=%d, strings=%s ) at %s:%d\n", debug_break, arg0, count, arg2, file, line );
         DebugFunction();
     }
-    return gldlCreateShaderProgramv_impl( type, count, strings );
+    GLuint ret = gldlCreateShaderProgramv_impl( type, count, strings );
+	return ret;
 }
-
 void gldlBindProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8586,7 +8608,6 @@ void gldlBindProgramPipeline ( GLuint pipeline, const char *arg0, const char *fi
     }
     gldlBindProgramPipeline_impl( pipeline );
 }
-
 void gldlDeleteProgramPipelines ( GLsizei n, const GLuint *pipelines, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8600,7 +8621,6 @@ void gldlDeleteProgramPipelines ( GLsizei n, const GLuint *pipelines, const char
     }
     gldlDeleteProgramPipelines_impl( n, pipelines );
 }
-
 void gldlGenProgramPipelines ( GLsizei n, GLuint *pipelines, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8614,7 +8634,6 @@ void gldlGenProgramPipelines ( GLsizei n, GLuint *pipelines, const char *arg0, c
     }
     gldlGenProgramPipelines_impl( n, pipelines );
 }
-
 GLboolean gldlIsProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8626,9 +8645,9 @@ GLboolean gldlIsProgramPipeline ( GLuint pipeline, const char *arg0, const char 
         printf( "Breakpoint %s on glIsProgramPipeline( pipeline=%d ) at %s:%d\n", debug_break, pipeline, file, line );
         DebugFunction();
     }
-    return gldlIsProgramPipeline_impl( pipeline );
+    GLboolean ret = gldlIsProgramPipeline_impl( pipeline );
+	return ret;
 }
-
 void gldlGetProgramPipelineiv ( GLuint pipeline, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8642,7 +8661,6 @@ void gldlGetProgramPipelineiv ( GLuint pipeline, GLenum pname, GLint *params, co
     }
     gldlGetProgramPipelineiv_impl( pipeline, pname, params );
 }
-
 void gldlProgramUniform1i ( GLuint program, GLint location, GLint v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8656,7 +8674,6 @@ void gldlProgramUniform1i ( GLuint program, GLint location, GLint v0, const char
     }
     gldlProgramUniform1i_impl( program, location, v0 );
 }
-
 void gldlProgramUniform1iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8670,21 +8687,19 @@ void gldlProgramUniform1iv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform1iv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform1f ( GLuint program, GLint location, GLfloat v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform1f( %d, %d, %s );\n", file, line, program, location,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform1f( %d, %d, %f );\n", file, line, program, location,  (float)v0 );
 
     DebugTest( 307 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glProgramUniform1f( program=%d, location=%d, v0=%s ) at %s:%d\n", debug_break, program, location, arg2, file, line );
+        printf( "Breakpoint %s on glProgramUniform1f( program=%d, location=%d, v0=%f ) at %s:%d\n", debug_break, program, location, (float)v0, file, line );
         DebugFunction();
     }
     gldlProgramUniform1f_impl( program, location, v0 );
 }
-
 void gldlProgramUniform1fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8698,21 +8713,19 @@ void gldlProgramUniform1fv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform1fv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform1d ( GLuint program, GLint location, GLdouble v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform1d( %d, %d, %s );\n", file, line, program, location,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform1d( %d, %d, %f );\n", file, line, program, location,  (float)v0 );
 
     DebugTest( 305 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glProgramUniform1d( program=%d, location=%d, v0=%s ) at %s:%d\n", debug_break, program, location, arg2, file, line );
+        printf( "Breakpoint %s on glProgramUniform1d( program=%d, location=%d, v0=%f ) at %s:%d\n", debug_break, program, location, (float)v0, file, line );
         DebugFunction();
     }
     gldlProgramUniform1d_impl( program, location, v0 );
 }
-
 void gldlProgramUniform1dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8726,7 +8739,6 @@ void gldlProgramUniform1dv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform1dv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform1ui ( GLuint program, GLint location, GLuint v0, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8740,7 +8752,6 @@ void gldlProgramUniform1ui ( GLuint program, GLint location, GLuint v0, const ch
     }
     gldlProgramUniform1ui_impl( program, location, v0 );
 }
-
 void gldlProgramUniform1uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8754,7 +8765,6 @@ void gldlProgramUniform1uiv ( GLuint program, GLint location, GLsizei count, con
     }
     gldlProgramUniform1uiv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform2i ( GLuint program, GLint location, GLint v0, GLint v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8768,7 +8778,6 @@ void gldlProgramUniform2i ( GLuint program, GLint location, GLint v0, GLint v1, 
     }
     gldlProgramUniform2i_impl( program, location, v0, v1 );
 }
-
 void gldlProgramUniform2iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8782,21 +8791,19 @@ void gldlProgramUniform2iv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform2iv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform2f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform2f( %d, %d, %s, %s );\n", file, line, program, location, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform2f( %d, %d, %f, %f );\n", file, line, program, location, (float)v0,  (float)v1 );
 
     DebugTest( 315 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glProgramUniform2f( program=%d, location=%d, v0=%s, v1=%s ) at %s:%d\n", debug_break, program, location, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glProgramUniform2f( program=%d, location=%d, v0=%f, v1=%f ) at %s:%d\n", debug_break, program, location, (float)v0, (float)v1, file, line );
         DebugFunction();
     }
     gldlProgramUniform2f_impl( program, location, v0, v1 );
 }
-
 void gldlProgramUniform2fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8810,21 +8817,19 @@ void gldlProgramUniform2fv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform2fv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform2d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform2d( %d, %d, %s, %s );\n", file, line, program, location, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform2d( %d, %d, %f, %f );\n", file, line, program, location, (float)v0,  (float)v1 );
 
     DebugTest( 313 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glProgramUniform2d( program=%d, location=%d, v0=%s, v1=%s ) at %s:%d\n", debug_break, program, location, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glProgramUniform2d( program=%d, location=%d, v0=%f, v1=%f ) at %s:%d\n", debug_break, program, location, (float)v0, (float)v1, file, line );
         DebugFunction();
     }
     gldlProgramUniform2d_impl( program, location, v0, v1 );
 }
-
 void gldlProgramUniform2dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8838,7 +8843,6 @@ void gldlProgramUniform2dv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform2dv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform2ui ( GLuint program, GLint location, GLuint v0, GLuint v1, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8852,7 +8856,6 @@ void gldlProgramUniform2ui ( GLuint program, GLint location, GLuint v0, GLuint v
     }
     gldlProgramUniform2ui_impl( program, location, v0, v1 );
 }
-
 void gldlProgramUniform2uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8866,7 +8869,6 @@ void gldlProgramUniform2uiv ( GLuint program, GLint location, GLsizei count, con
     }
     gldlProgramUniform2uiv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform3i ( GLuint program, GLint location, GLint v0, GLint v1, GLint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8880,7 +8882,6 @@ void gldlProgramUniform3i ( GLuint program, GLint location, GLint v0, GLint v1, 
     }
     gldlProgramUniform3i_impl( program, location, v0, v1, v2 );
 }
-
 void gldlProgramUniform3iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8894,21 +8895,19 @@ void gldlProgramUniform3iv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform3iv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform3f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform3f( %d, %d, %s, %s, %s );\n", file, line, program, location, arg2, arg3,  arg4 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform3f( %d, %d, %f, %f, %f );\n", file, line, program, location, (float)v0, (float)v1,  (float)v2 );
 
     DebugTest( 323 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glProgramUniform3f( program=%d, location=%d, v0=%s, v1=%s, v2=%s ) at %s:%d\n", debug_break, program, location, arg2, arg3, arg4, file, line );
+        printf( "Breakpoint %s on glProgramUniform3f( program=%d, location=%d, v0=%f, v1=%f, v2=%f ) at %s:%d\n", debug_break, program, location, (float)v0, (float)v1, (float)v2, file, line );
         DebugFunction();
     }
     gldlProgramUniform3f_impl( program, location, v0, v1, v2 );
 }
-
 void gldlProgramUniform3fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8922,21 +8921,19 @@ void gldlProgramUniform3fv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform3fv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform3d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, GLdouble v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform3d( %d, %d, %s, %s, %s );\n", file, line, program, location, arg2, arg3,  arg4 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform3d( %d, %d, %f, %f, %f );\n", file, line, program, location, (float)v0, (float)v1,  (float)v2 );
 
     DebugTest( 321 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glProgramUniform3d( program=%d, location=%d, v0=%s, v1=%s, v2=%s ) at %s:%d\n", debug_break, program, location, arg2, arg3, arg4, file, line );
+        printf( "Breakpoint %s on glProgramUniform3d( program=%d, location=%d, v0=%f, v1=%f, v2=%f ) at %s:%d\n", debug_break, program, location, (float)v0, (float)v1, (float)v2, file, line );
         DebugFunction();
     }
     gldlProgramUniform3d_impl( program, location, v0, v1, v2 );
 }
-
 void gldlProgramUniform3dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8950,7 +8947,6 @@ void gldlProgramUniform3dv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform3dv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform3ui ( GLuint program, GLint location, GLuint v0, GLuint v1, GLuint v2, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8964,7 +8960,6 @@ void gldlProgramUniform3ui ( GLuint program, GLint location, GLuint v0, GLuint v
     }
     gldlProgramUniform3ui_impl( program, location, v0, v1, v2 );
 }
-
 void gldlProgramUniform3uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8978,7 +8973,6 @@ void gldlProgramUniform3uiv ( GLuint program, GLint location, GLsizei count, con
     }
     gldlProgramUniform3uiv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform4i ( GLuint program, GLint location, GLint v0, GLint v1, GLint v2, GLint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -8992,7 +8986,6 @@ void gldlProgramUniform4i ( GLuint program, GLint location, GLint v0, GLint v1, 
     }
     gldlProgramUniform4i_impl( program, location, v0, v1, v2, v3 );
 }
-
 void gldlProgramUniform4iv ( GLuint program, GLint location, GLsizei count, const GLint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9006,21 +8999,19 @@ void gldlProgramUniform4iv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform4iv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform4f ( GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform4f( %d, %d, %s, %s, %s, %s );\n", file, line, program, location, arg2, arg3, arg4,  arg5 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform4f( %d, %d, %f, %f, %f, %f );\n", file, line, program, location, (float)v0, (float)v1, (float)v2,  (float)v3 );
 
     DebugTest( 331 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glProgramUniform4f( program=%d, location=%d, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", debug_break, program, location, arg2, arg3, arg4, arg5, file, line );
+        printf( "Breakpoint %s on glProgramUniform4f( program=%d, location=%d, v0=%f, v1=%f, v2=%f, v3=%f ) at %s:%d\n", debug_break, program, location, (float)v0, (float)v1, (float)v2, (float)v3, file, line );
         DebugFunction();
     }
     gldlProgramUniform4f_impl( program, location, v0, v1, v2, v3 );
 }
-
 void gldlProgramUniform4fv ( GLuint program, GLint location, GLsizei count, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9034,21 +9025,19 @@ void gldlProgramUniform4fv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform4fv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform4d ( GLuint program, GLint location, GLdouble v0, GLdouble v1, GLdouble v2, GLdouble v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform4d( %d, %d, %s, %s, %s, %s );\n", file, line, program, location, arg2, arg3, arg4,  arg5 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glProgramUniform4d( %d, %d, %f, %f, %f, %f );\n", file, line, program, location, (float)v0, (float)v1, (float)v2,  (float)v3 );
 
     DebugTest( 329 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glProgramUniform4d( program=%d, location=%d, v0=%s, v1=%s, v2=%s, v3=%s ) at %s:%d\n", debug_break, program, location, arg2, arg3, arg4, arg5, file, line );
+        printf( "Breakpoint %s on glProgramUniform4d( program=%d, location=%d, v0=%f, v1=%f, v2=%f, v3=%f ) at %s:%d\n", debug_break, program, location, (float)v0, (float)v1, (float)v2, (float)v3, file, line );
         DebugFunction();
     }
     gldlProgramUniform4d_impl( program, location, v0, v1, v2, v3 );
 }
-
 void gldlProgramUniform4dv ( GLuint program, GLint location, GLsizei count, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9062,7 +9051,6 @@ void gldlProgramUniform4dv ( GLuint program, GLint location, GLsizei count, cons
     }
     gldlProgramUniform4dv_impl( program, location, count, value );
 }
-
 void gldlProgramUniform4ui ( GLuint program, GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9076,7 +9064,6 @@ void gldlProgramUniform4ui ( GLuint program, GLint location, GLuint v0, GLuint v
     }
     gldlProgramUniform4ui_impl( program, location, v0, v1, v2, v3 );
 }
-
 void gldlProgramUniform4uiv ( GLuint program, GLint location, GLsizei count, const GLuint *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9090,7 +9077,6 @@ void gldlProgramUniform4uiv ( GLuint program, GLint location, GLsizei count, con
     }
     gldlProgramUniform4uiv_impl( program, location, count, value );
 }
-
 void gldlProgramUniformMatrix2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9104,7 +9090,6 @@ void gldlProgramUniformMatrix2fv ( GLuint program, GLint location, GLsizei count
     }
     gldlProgramUniformMatrix2fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9118,7 +9103,6 @@ void gldlProgramUniformMatrix3fv ( GLuint program, GLint location, GLsizei count
     }
     gldlProgramUniformMatrix3fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9132,7 +9116,6 @@ void gldlProgramUniformMatrix4fv ( GLuint program, GLint location, GLsizei count
     }
     gldlProgramUniformMatrix4fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9146,7 +9129,6 @@ void gldlProgramUniformMatrix2dv ( GLuint program, GLint location, GLsizei count
     }
     gldlProgramUniformMatrix2dv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9160,7 +9142,6 @@ void gldlProgramUniformMatrix3dv ( GLuint program, GLint location, GLsizei count
     }
     gldlProgramUniformMatrix3dv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9174,7 +9155,6 @@ void gldlProgramUniformMatrix4dv ( GLuint program, GLint location, GLsizei count
     }
     gldlProgramUniformMatrix4dv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix2x3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9188,7 +9168,6 @@ void gldlProgramUniformMatrix2x3fv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix2x3fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix3x2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9202,7 +9181,6 @@ void gldlProgramUniformMatrix3x2fv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix3x2fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix2x4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9216,7 +9194,6 @@ void gldlProgramUniformMatrix2x4fv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix2x4fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix4x2fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9230,7 +9207,6 @@ void gldlProgramUniformMatrix4x2fv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix4x2fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix3x4fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9244,7 +9220,6 @@ void gldlProgramUniformMatrix3x4fv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix3x4fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix4x3fv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9258,7 +9233,6 @@ void gldlProgramUniformMatrix4x3fv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix4x3fv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix2x3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9272,7 +9246,6 @@ void gldlProgramUniformMatrix2x3dv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix2x3dv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix3x2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9286,7 +9259,6 @@ void gldlProgramUniformMatrix3x2dv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix3x2dv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix2x4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9300,7 +9272,6 @@ void gldlProgramUniformMatrix2x4dv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix2x4dv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix4x2dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9314,7 +9285,6 @@ void gldlProgramUniformMatrix4x2dv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix4x2dv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix3x4dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9328,7 +9298,6 @@ void gldlProgramUniformMatrix3x4dv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix3x4dv_impl( program, location, count, transpose, value );
 }
-
 void gldlProgramUniformMatrix4x3dv ( GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLdouble *value, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9342,7 +9311,6 @@ void gldlProgramUniformMatrix4x3dv ( GLuint program, GLint location, GLsizei cou
     }
     gldlProgramUniformMatrix4x3dv_impl( program, location, count, transpose, value );
 }
-
 void gldlValidateProgramPipeline ( GLuint pipeline, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9356,7 +9324,6 @@ void gldlValidateProgramPipeline ( GLuint pipeline, const char *arg0, const char
     }
     gldlValidateProgramPipeline_impl( pipeline );
 }
-
 void gldlGetProgramPipelineInfoLog ( GLuint pipeline, GLsizei bufSize, GLsizei *length, GLchar *infoLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9370,63 +9337,58 @@ void gldlGetProgramPipelineInfoLog ( GLuint pipeline, GLsizei bufSize, GLsizei *
     }
     gldlGetProgramPipelineInfoLog_impl( pipeline, bufSize, length, infoLog );
 }
-
 void gldlVertexAttribL1d ( GLuint index, GLdouble x, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttribL1d( %d, %s );\n", file, line, index,  arg1 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttribL1d( %d, %f );\n", file, line, index,  (float)x );
 
     DebugTest( 531 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttribL1d( index=%d, x=%s ) at %s:%d\n", debug_break, index, arg1, file, line );
+        printf( "Breakpoint %s on glVertexAttribL1d( index=%d, x=%f ) at %s:%d\n", debug_break, index, (float)x, file, line );
         DebugFunction();
     }
     gldlVertexAttribL1d_impl( index, x );
 }
-
 void gldlVertexAttribL2d ( GLuint index, GLdouble x, GLdouble y, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttribL2d( %d, %s, %s );\n", file, line, index, arg1,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttribL2d( %d, %f, %f );\n", file, line, index, (float)x,  (float)y );
 
     DebugTest( 533 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttribL2d( index=%d, x=%s, y=%s ) at %s:%d\n", debug_break, index, arg1, arg2, file, line );
+        printf( "Breakpoint %s on glVertexAttribL2d( index=%d, x=%f, y=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, file, line );
         DebugFunction();
     }
     gldlVertexAttribL2d_impl( index, x, y );
 }
-
 void gldlVertexAttribL3d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttribL3d( %d, %s, %s, %s );\n", file, line, index, arg1, arg2,  arg3 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttribL3d( %d, %f, %f, %f );\n", file, line, index, (float)x, (float)y,  (float)z );
 
     DebugTest( 535 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttribL3d( index=%d, x=%s, y=%s, z=%s ) at %s:%d\n", debug_break, index, arg1, arg2, arg3, file, line );
+        printf( "Breakpoint %s on glVertexAttribL3d( index=%d, x=%f, y=%f, z=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, (float)z, file, line );
         DebugFunction();
     }
     gldlVertexAttribL3d_impl( index, x, y, z );
 }
-
 void gldlVertexAttribL4d ( GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttribL4d( %d, %s, %s, %s, %s );\n", file, line, index, arg1, arg2, arg3,  arg4 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glVertexAttribL4d( %d, %f, %f, %f, %f );\n", file, line, index, (float)x, (float)y, (float)z,  (float)w );
 
     DebugTest( 537 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glVertexAttribL4d( index=%d, x=%s, y=%s, z=%s, w=%s ) at %s:%d\n", debug_break, index, arg1, arg2, arg3, arg4, file, line );
+        printf( "Breakpoint %s on glVertexAttribL4d( index=%d, x=%f, y=%f, z=%f, w=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, (float)z, (float)w, file, line );
         DebugFunction();
     }
     gldlVertexAttribL4d_impl( index, x, y, z, w );
 }
-
 void gldlVertexAttribL1dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9440,7 +9402,6 @@ void gldlVertexAttribL1dv ( GLuint index, const GLdouble *v, const char *arg0, c
     }
     gldlVertexAttribL1dv_impl( index, v );
 }
-
 void gldlVertexAttribL2dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9454,7 +9415,6 @@ void gldlVertexAttribL2dv ( GLuint index, const GLdouble *v, const char *arg0, c
     }
     gldlVertexAttribL2dv_impl( index, v );
 }
-
 void gldlVertexAttribL3dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9468,7 +9428,6 @@ void gldlVertexAttribL3dv ( GLuint index, const GLdouble *v, const char *arg0, c
     }
     gldlVertexAttribL3dv_impl( index, v );
 }
-
 void gldlVertexAttribL4dv ( GLuint index, const GLdouble *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9482,7 +9441,6 @@ void gldlVertexAttribL4dv ( GLuint index, const GLdouble *v, const char *arg0, c
     }
     gldlVertexAttribL4dv_impl( index, v );
 }
-
 void gldlVertexAttribLPointer ( GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9496,7 +9454,6 @@ void gldlVertexAttribLPointer ( GLuint index, GLint size, GLenum type, GLsizei s
     }
     gldlVertexAttribLPointer_impl( index, size, type, stride, pointer );
 }
-
 void gldlGetVertexAttribLdv ( GLuint index, GLenum pname, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9510,7 +9467,6 @@ void gldlGetVertexAttribLdv ( GLuint index, GLenum pname, GLdouble *params, cons
     }
     gldlGetVertexAttribLdv_impl( index, pname, params );
 }
-
 void gldlViewportArrayv ( GLuint first, GLsizei count, const GLfloat *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9524,21 +9480,19 @@ void gldlViewportArrayv ( GLuint first, GLsizei count, const GLfloat *v, const c
     }
     gldlViewportArrayv_impl( first, count, v );
 }
-
 void gldlViewportIndexedf ( GLuint index, GLfloat x, GLfloat y, GLfloat w, GLfloat h, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glViewportIndexedf( %d, %s, %s, %s, %s );\n", file, line, index, arg1, arg2, arg3,  arg4 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glViewportIndexedf( %d, %f, %f, %f, %f );\n", file, line, index, (float)x, (float)y, (float)w,  (float)h );
 
     DebugTest( 557 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glViewportIndexedf( index=%d, x=%s, y=%s, w=%s, h=%s ) at %s:%d\n", debug_break, index, arg1, arg2, arg3, arg4, file, line );
+        printf( "Breakpoint %s on glViewportIndexedf( index=%d, x=%f, y=%f, w=%f, h=%f ) at %s:%d\n", debug_break, index, (float)x, (float)y, (float)w, (float)h, file, line );
         DebugFunction();
     }
     gldlViewportIndexedf_impl( index, x, y, w, h );
 }
-
 void gldlViewportIndexedfv ( GLuint index, const GLfloat *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9552,7 +9506,6 @@ void gldlViewportIndexedfv ( GLuint index, const GLfloat *v, const char *arg0, c
     }
     gldlViewportIndexedfv_impl( index, v );
 }
-
 void gldlScissorArrayv ( GLuint first, GLsizei count, const GLint *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9566,7 +9519,6 @@ void gldlScissorArrayv ( GLuint first, GLsizei count, const GLint *v, const char
     }
     gldlScissorArrayv_impl( first, count, v );
 }
-
 void gldlScissorIndexed ( GLuint index, GLint left, GLint bottom, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9580,7 +9532,6 @@ void gldlScissorIndexed ( GLuint index, GLint left, GLint bottom, GLsizei width,
     }
     gldlScissorIndexed_impl( index, left, bottom, width, height );
 }
-
 void gldlScissorIndexedv ( GLuint index, const GLint *v, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9594,7 +9545,6 @@ void gldlScissorIndexedv ( GLuint index, const GLint *v, const char *arg0, const
     }
     gldlScissorIndexedv_impl( index, v );
 }
-
 void gldlDepthRangeArrayv ( GLuint first, GLsizei count, const GLclampd *v, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9608,21 +9558,19 @@ void gldlDepthRangeArrayv ( GLuint first, GLsizei count, const GLclampd *v, cons
     }
     gldlDepthRangeArrayv_impl( first, count, v );
 }
-
 void gldlDepthRangeIndexed ( GLuint index, GLclampd n, GLclampd f, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
         if( gldl_traces[i].started )
-            fprintf( gldl_traces[i].f, "call<%s,%d>: glDepthRangeIndexed( %d, %s, %s );\n", file, line, index, arg1,  arg2 );
+            fprintf( gldl_traces[i].f, "call<%s,%d>: glDepthRangeIndexed( %d, %f, %f );\n", file, line, index, (float)n,  (float)f );
 
     DebugTest( 94 );
     if( debug_break[0] ) {
-        printf( "Breakpoint %s on glDepthRangeIndexed( index=%d, n=%s, f=%s ) at %s:%d\n", debug_break, index, arg1, arg2, file, line );
+        printf( "Breakpoint %s on glDepthRangeIndexed( index=%d, n=%f, f=%f ) at %s:%d\n", debug_break, index, (float)n, (float)f, file, line );
         DebugFunction();
     }
     gldlDepthRangeIndexed_impl( index, n, f );
 }
-
 void gldlGetFloati_v ( GLenum target, GLuint index, GLfloat *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9636,7 +9584,6 @@ void gldlGetFloati_v ( GLenum target, GLuint index, GLfloat *data, const char *a
     }
     gldlGetFloati_v_impl( target, index, data );
 }
-
 void gldlGetDoublei_v ( GLenum target, GLuint index, GLdouble *data, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9650,7 +9597,6 @@ void gldlGetDoublei_v ( GLenum target, GLuint index, GLdouble *data, const char 
     }
     gldlGetDoublei_v_impl( target, index, data );
 }
-
 GLsync gldlCreateSyncFromCLeventARB ( struct _cl_context * context, struct _cl_event * event, GLbitfield flags, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9662,9 +9608,9 @@ GLsync gldlCreateSyncFromCLeventARB ( struct _cl_context * context, struct _cl_e
         printf( "Breakpoint %s on glCreateSyncFromCLeventARB( context=%s, event=%s, flags=%s ) at %s:%d\n", debug_break, arg0, arg1, arg2, file, line );
         DebugFunction();
     }
-    return gldlCreateSyncFromCLeventARB_impl( context, event, flags );
+    GLsync ret = gldlCreateSyncFromCLeventARB_impl( context, event, flags );
+	return ret;
 }
-
 void gldlDebugMessageControlARB ( GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint *ids, GLboolean enabled, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9678,7 +9624,6 @@ void gldlDebugMessageControlARB ( GLenum source, GLenum type, GLenum severity, G
     }
     gldlDebugMessageControlARB_impl( source, type, severity, count, ids, enabled );
 }
-
 void gldlDebugMessageInsertARB ( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *buf, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9692,7 +9637,6 @@ void gldlDebugMessageInsertARB ( GLenum source, GLenum type, GLuint id, GLenum s
     }
     gldlDebugMessageInsertARB_impl( source, type, id, severity, length, buf );
 }
-
 void gldlDebugMessageCallbackARB ( GLDEBUGPROCARB callback, const GLvoid *userParam, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9706,7 +9650,6 @@ void gldlDebugMessageCallbackARB ( GLDEBUGPROCARB callback, const GLvoid *userPa
     }
     gldlDebugMessageCallbackARB_impl( callback, userParam );
 }
-
 GLuint gldlGetDebugMessageLogARB ( GLuint count, GLsizei bufsize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9718,9 +9661,9 @@ GLuint gldlGetDebugMessageLogARB ( GLuint count, GLsizei bufsize, GLenum *source
         printf( "Breakpoint %s on glGetDebugMessageLogARB( count=%d, bufsize=%d, sources=%s, types=%s, ids=%s, severities=%s, lengths=%s, messageLog=%s ) at %s:%d\n", debug_break, count, bufsize, arg2, arg3, arg4, arg5, arg6, arg7, file, line );
         DebugFunction();
     }
-    return gldlGetDebugMessageLogARB_impl( count, bufsize, sources, types, ids, severities, lengths, messageLog );
+    GLuint ret = gldlGetDebugMessageLogARB_impl( count, bufsize, sources, types, ids, severities, lengths, messageLog );
+	return ret;
 }
-
 GLenum gldlGetGraphicsResetStatusARB ( const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9733,9 +9676,9 @@ GLenum gldlGetGraphicsResetStatusARB ( const char *file, int line ) {
 
         DebugFunction();
     }
-    return gldlGetGraphicsResetStatusARB_impl(  );
+    GLenum ret = gldlGetGraphicsResetStatusARB_impl(  );
+	return ret;
 }
-
 void gldlGetnMapdvARB ( GLenum target, GLenum query, GLsizei bufSize, GLdouble *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9749,7 +9692,6 @@ void gldlGetnMapdvARB ( GLenum target, GLenum query, GLsizei bufSize, GLdouble *
     }
     gldlGetnMapdvARB_impl( target, query, bufSize, v );
 }
-
 void gldlGetnMapfvARB ( GLenum target, GLenum query, GLsizei bufSize, GLfloat *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9763,7 +9705,6 @@ void gldlGetnMapfvARB ( GLenum target, GLenum query, GLsizei bufSize, GLfloat *v
     }
     gldlGetnMapfvARB_impl( target, query, bufSize, v );
 }
-
 void gldlGetnMapivARB ( GLenum target, GLenum query, GLsizei bufSize, GLint *v, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9777,7 +9718,6 @@ void gldlGetnMapivARB ( GLenum target, GLenum query, GLsizei bufSize, GLint *v, 
     }
     gldlGetnMapivARB_impl( target, query, bufSize, v );
 }
-
 void gldlGetnPixelMapfvARB ( GLenum map, GLsizei bufSize, GLfloat *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9791,7 +9731,6 @@ void gldlGetnPixelMapfvARB ( GLenum map, GLsizei bufSize, GLfloat *values, const
     }
     gldlGetnPixelMapfvARB_impl( map, bufSize, values );
 }
-
 void gldlGetnPixelMapuivARB ( GLenum map, GLsizei bufSize, GLuint *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9805,7 +9744,6 @@ void gldlGetnPixelMapuivARB ( GLenum map, GLsizei bufSize, GLuint *values, const
     }
     gldlGetnPixelMapuivARB_impl( map, bufSize, values );
 }
-
 void gldlGetnPixelMapusvARB ( GLenum map, GLsizei bufSize, GLushort *values, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9819,7 +9757,6 @@ void gldlGetnPixelMapusvARB ( GLenum map, GLsizei bufSize, GLushort *values, con
     }
     gldlGetnPixelMapusvARB_impl( map, bufSize, values );
 }
-
 void gldlGetnPolygonStippleARB ( GLsizei bufSize, GLubyte *pattern, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9833,7 +9770,6 @@ void gldlGetnPolygonStippleARB ( GLsizei bufSize, GLubyte *pattern, const char *
     }
     gldlGetnPolygonStippleARB_impl( bufSize, pattern );
 }
-
 void gldlGetnColorTableARB ( GLenum target, GLenum format, GLenum type, GLsizei bufSize, GLvoid *table, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9847,7 +9783,6 @@ void gldlGetnColorTableARB ( GLenum target, GLenum format, GLenum type, GLsizei 
     }
     gldlGetnColorTableARB_impl( target, format, type, bufSize, table );
 }
-
 void gldlGetnConvolutionFilterARB ( GLenum target, GLenum format, GLenum type, GLsizei bufSize, GLvoid *image, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9861,7 +9796,6 @@ void gldlGetnConvolutionFilterARB ( GLenum target, GLenum format, GLenum type, G
     }
     gldlGetnConvolutionFilterARB_impl( target, format, type, bufSize, image );
 }
-
 void gldlGetnSeparableFilterARB ( GLenum target, GLenum format, GLenum type, GLsizei rowBufSize, GLvoid *row, GLsizei columnBufSize, GLvoid *column, GLvoid *span, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9875,7 +9809,6 @@ void gldlGetnSeparableFilterARB ( GLenum target, GLenum format, GLenum type, GLs
     }
     gldlGetnSeparableFilterARB_impl( target, format, type, rowBufSize, row, columnBufSize, column, span );
 }
-
 void gldlGetnHistogramARB ( GLenum target, GLboolean reset, GLenum format, GLenum type, GLsizei bufSize, GLvoid *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9889,7 +9822,6 @@ void gldlGetnHistogramARB ( GLenum target, GLboolean reset, GLenum format, GLenu
     }
     gldlGetnHistogramARB_impl( target, reset, format, type, bufSize, values );
 }
-
 void gldlGetnMinmaxARB ( GLenum target, GLboolean reset, GLenum format, GLenum type, GLsizei bufSize, GLvoid *values, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9903,7 +9835,6 @@ void gldlGetnMinmaxARB ( GLenum target, GLboolean reset, GLenum format, GLenum t
     }
     gldlGetnMinmaxARB_impl( target, reset, format, type, bufSize, values );
 }
-
 void gldlGetnTexImageARB ( GLenum target, GLint level, GLenum format, GLenum type, GLsizei bufSize, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9917,7 +9848,6 @@ void gldlGetnTexImageARB ( GLenum target, GLint level, GLenum format, GLenum typ
     }
     gldlGetnTexImageARB_impl( target, level, format, type, bufSize, img );
 }
-
 void gldlReadnPixelsARB ( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, GLvoid *data, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *arg7, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9931,7 +9861,6 @@ void gldlReadnPixelsARB ( GLint x, GLint y, GLsizei width, GLsizei height, GLenu
     }
     gldlReadnPixelsARB_impl( x, y, width, height, format, type, bufSize, data );
 }
-
 void gldlGetnCompressedTexImageARB ( GLenum target, GLint lod, GLsizei bufSize, GLvoid *img, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9945,7 +9874,6 @@ void gldlGetnCompressedTexImageARB ( GLenum target, GLint lod, GLsizei bufSize, 
     }
     gldlGetnCompressedTexImageARB_impl( target, lod, bufSize, img );
 }
-
 void gldlGetnUniformfvARB ( GLuint program, GLint location, GLsizei bufSize, GLfloat *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9959,7 +9887,6 @@ void gldlGetnUniformfvARB ( GLuint program, GLint location, GLsizei bufSize, GLf
     }
     gldlGetnUniformfvARB_impl( program, location, bufSize, params );
 }
-
 void gldlGetnUniformivARB ( GLuint program, GLint location, GLsizei bufSize, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9973,7 +9900,6 @@ void gldlGetnUniformivARB ( GLuint program, GLint location, GLsizei bufSize, GLi
     }
     gldlGetnUniformivARB_impl( program, location, bufSize, params );
 }
-
 void gldlGetnUniformuivARB ( GLuint program, GLint location, GLsizei bufSize, GLuint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -9987,7 +9913,6 @@ void gldlGetnUniformuivARB ( GLuint program, GLint location, GLsizei bufSize, GL
     }
     gldlGetnUniformuivARB_impl( program, location, bufSize, params );
 }
-
 void gldlGetnUniformdvARB ( GLuint program, GLint location, GLsizei bufSize, GLdouble *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10001,7 +9926,6 @@ void gldlGetnUniformdvARB ( GLuint program, GLint location, GLsizei bufSize, GLd
     }
     gldlGetnUniformdvARB_impl( program, location, bufSize, params );
 }
-
 void gldlDrawArraysInstancedBaseInstance ( GLenum mode, GLint first, GLsizei count, GLsizei primcount, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10015,7 +9939,6 @@ void gldlDrawArraysInstancedBaseInstance ( GLenum mode, GLint first, GLsizei cou
     }
     gldlDrawArraysInstancedBaseInstance_impl( mode, first, count, primcount, baseinstance );
 }
-
 void gldlDrawElementsInstancedBaseInstance ( GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10029,7 +9952,6 @@ void gldlDrawElementsInstancedBaseInstance ( GLenum mode, GLsizei count, GLenum 
     }
     gldlDrawElementsInstancedBaseInstance_impl( mode, count, type, indices, primcount, baseinstance );
 }
-
 void gldlDrawElementsInstancedBaseVertexBaseInstance ( GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount, GLint basevertex, GLuint baseinstance, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10043,7 +9965,6 @@ void gldlDrawElementsInstancedBaseVertexBaseInstance ( GLenum mode, GLsizei coun
     }
     gldlDrawElementsInstancedBaseVertexBaseInstance_impl( mode, count, type, indices, primcount, basevertex, baseinstance );
 }
-
 void gldlDrawTransformFeedbackInstanced ( GLenum mode, GLuint id, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10057,7 +9978,6 @@ void gldlDrawTransformFeedbackInstanced ( GLenum mode, GLuint id, GLsizei primco
     }
     gldlDrawTransformFeedbackInstanced_impl( mode, id, primcount );
 }
-
 void gldlDrawTransformFeedbackStreamInstanced ( GLenum mode, GLuint id, GLuint stream, GLsizei primcount, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10071,7 +9991,6 @@ void gldlDrawTransformFeedbackStreamInstanced ( GLenum mode, GLuint id, GLuint s
     }
     gldlDrawTransformFeedbackStreamInstanced_impl( mode, id, stream, primcount );
 }
-
 void gldlGetInternalformativ ( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10085,7 +10004,6 @@ void gldlGetInternalformativ ( GLenum target, GLenum internalformat, GLenum pnam
     }
     gldlGetInternalformativ_impl( target, internalformat, pname, bufSize, params );
 }
-
 void gldlGetActiveAtomicCounterBufferiv ( GLuint program, GLuint bufferIndex, GLenum pname, GLint *params, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10099,7 +10017,6 @@ void gldlGetActiveAtomicCounterBufferiv ( GLuint program, GLuint bufferIndex, GL
     }
     gldlGetActiveAtomicCounterBufferiv_impl( program, bufferIndex, pname, params );
 }
-
 void gldlBindImageTexture ( GLuint unit, GLuint texture, GLint level, GLboolean layered, GLint layer, GLenum access, GLenum format, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10113,7 +10030,6 @@ void gldlBindImageTexture ( GLuint unit, GLuint texture, GLint level, GLboolean 
     }
     gldlBindImageTexture_impl( unit, texture, level, layered, layer, access, format );
 }
-
 void gldlMemoryBarrier ( GLbitfield barriers, const char *arg0, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10127,7 +10043,6 @@ void gldlMemoryBarrier ( GLbitfield barriers, const char *arg0, const char *file
     }
     gldlMemoryBarrier_impl( barriers );
 }
-
 void gldlTexStorage1D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10141,7 +10056,6 @@ void gldlTexStorage1D ( GLenum target, GLsizei levels, GLenum internalformat, GL
     }
     gldlTexStorage1D_impl( target, levels, internalformat, width );
 }
-
 void gldlTexStorage2D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10155,7 +10069,6 @@ void gldlTexStorage2D ( GLenum target, GLsizei levels, GLenum internalformat, GL
     }
     gldlTexStorage2D_impl( target, levels, internalformat, width, height );
 }
-
 void gldlTexStorage3D ( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10169,7 +10082,6 @@ void gldlTexStorage3D ( GLenum target, GLsizei levels, GLenum internalformat, GL
     }
     gldlTexStorage3D_impl( target, levels, internalformat, width, height, depth );
 }
-
 void gldlTextureStorage1DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10183,7 +10095,6 @@ void gldlTextureStorage1DEXT ( GLuint texture, GLenum target, GLsizei levels, GL
     }
     gldlTextureStorage1DEXT_impl( texture, target, levels, internalformat, width );
 }
-
 void gldlTextureStorage2DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10197,7 +10108,6 @@ void gldlTextureStorage2DEXT ( GLuint texture, GLenum target, GLsizei levels, GL
     }
     gldlTextureStorage2DEXT_impl( texture, target, levels, internalformat, width, height );
 }
-
 void gldlTextureStorage3DEXT ( GLuint texture, GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, const char *arg0, const char *arg1, const char *arg2, const char *arg3, const char *arg4, const char *arg5, const char *arg6, const char *file, int line ) {
     int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -10211,4 +10121,3 @@ void gldlTextureStorage3DEXT ( GLuint texture, GLenum target, GLsizei levels, GL
     }
     gldlTextureStorage3DEXT_impl( texture, target, levels, internalformat, width, height, depth );
 }
-

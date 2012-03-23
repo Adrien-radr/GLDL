@@ -281,20 +281,78 @@ static struct {
     int                 bound_elem_array_b;
 } gldl_buffers;
 
+// GL shader
+struct gldl_shader {
+    GLuint      id;         // Shader GL id
+    GLenum      type;       // GL_{VERTEX,FRAGMENT}_SHADER
+
+    char        *src;       // Shader source
+    GLuint      size;       // Shader source size
+
+    int         next_free;
+};
+
+// GL program
+struct gldl_program {
+    GLuint      id;         // Program GL id
+    GLuint      vs, fs;     // Program linked vertex and fragment shaders ids
+
+    int         next_free;
+};
+
+static struct {
+    struct gldl_shader      *arr;
+    unsigned int            size;
+    unsigned int            count;
+    unsigned int            first_free;
+} gldl_shaders;
+
+static struct {
+    struct gldl_program     *arr;
+    unsigned int            size;
+    unsigned int            count;
+    unsigned int            first_free;
+
+    unsigned int            bound_program;
+} gldl_programs;
+
+
 static struct {
     GLint       major,
                 minor;
 } gl_version;
 
 
+// GLDL Buffer functions
 static void InitBufferArray();
 static void DeleteBufferArray();
 static void AddBuffers( GLsizei n, GLuint *ids );
 static void DeleteBuffers( GLsizei n, const GLuint *ids );
 static void BindBuffer( GLuint id, int elem_array );
 static void FillBuffer( const void* data, GLsizei size, unsigned int offset, int elem_array );
-static void PrintBufferData( int id, unsigned int type_size, unsigned int elem_size );
-static void PrintBuffers();
+
+static void ListBuffers();
+static void PrintBuffer( int id, unsigned int type_size, unsigned int elem_size );
+
+// GLDL Program/Shader functions
+static void InitShaderArray();
+static void DeleteShaderArray();
+static void AddShader( GLuint id, GLenum type );
+static void DeleteShader( GLuint id );
+static void SetShaderSource( GLuint id, const char *src );
+static void AddProgram( GLuint id );
+static void DeleteProgram( GLuint id );
+static void AttachShader( GLuint prog_id, GLuint shader_id );
+static void DetachShader( GLuint prog_id, GLuint shader_id );
+static void BindProgram( GLuint id );
+
+static void ListPrograms();
+static void PrintProgram( int id );
+static void ListShaders();
+static void PrintShader( int id );
+
+
+
 
 static int  GetGLVersion();
 static void DebugTest( int func_index );
@@ -317,6 +375,7 @@ int gldlInit() {
         gldl_traces[0].started = 1;
 
         InitBufferArray();
+        InitShaderArray();
 
         memset( break_functions, -1, GLDL_FUNC_N * sizeof(int) );
         DebugFunction();
@@ -329,6 +388,7 @@ int gldlInit() {
 void gldlTerminate() {
     int i;
 
+    DeleteShaderArray();
     DeleteBufferArray();
 
     for( i = 0; i < TRACE_N; ++i ) 
@@ -389,8 +449,7 @@ static void InitBufferArray() {
 static void DeleteBufferArray() {
     int i;
     for( i = 0; i < gldl_buffers.size; ++i ) 
-        if( gldl_buffers.arr[i].data )
-            free( gldl_buffers.arr[i].data );
+        free( gldl_buffers.arr[i].data );
 
     free( gldl_buffers.arr );
 }
@@ -540,7 +599,7 @@ static void FillBuffer( const void* data, GLsizei size, unsigned int offset, int
     }
 }
 
-static void PrintBufferData( int id, unsigned int type_size, unsigned int elem_size ) {
+static void PrintBuffer( int id, unsigned int type_size, unsigned int elem_size ) {
     int i, j, k;
     int array_size;
 
@@ -587,7 +646,7 @@ static void PrintBufferData( int id, unsigned int type_size, unsigned int elem_s
     printf( "This buffer does not exist.\n" );
 }
 
-static void PrintBuffers() {
+static void ListBuffers() {
     int buf_cpt = 0;
     int i;
 
@@ -606,6 +665,340 @@ static void PrintBuffers() {
     if( !buf_cpt )
         printf( "No GL buffers.\n" );
 }
+
+static void InitShaderArray() {
+    int i;
+
+    // init shaders
+    gldl_shaders.size = 20;
+    gldl_shaders.count = 0;
+    gldl_shaders.first_free = 0;
+
+    gldl_shaders.arr = calloc( gldl_shaders.size, sizeof(struct gldl_shader) );
+
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        gldl_shaders.arr[i].id = -1;
+        gldl_shaders.arr[i].next_free = i+1;
+    }
+    gldl_shaders.arr[i-1].next_free = -1;
+
+    // init programs
+    gldl_programs.size = 20;
+    gldl_programs.count = 0;
+    gldl_programs.first_free = 0;
+
+    gldl_programs.arr = calloc( gldl_programs.size, sizeof(struct gldl_program) );
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        gldl_programs.arr[i].id = -1;
+        gldl_programs.arr[i].next_free = i+1;
+    }
+    gldl_programs.arr[i-1].next_free = -1;
+}
+
+static void DeleteShaderArray() {
+    int i;
+
+    for( i = 0; i < gldl_shaders.size; ++i ) 
+        free( gldl_shaders.arr[i].src );
+
+    free( gldl_shaders.arr );
+    free( gldl_programs.arr );
+}
+
+static void AddShader( GLuint id, GLenum type ) {
+    int i;
+    int index = gldl_shaders.first_free;
+
+    if( -1 == index ) {
+        gldl_shaders.arr[gldl_shaders.size-1].next_free = gldl_shaders.size;
+
+        gldl_shaders.size *= 1.7;
+        gldl_shaders.arr = realloc( gldl_shaders.arr, sizeof(struct gldl_shader) * gldl_shaders.size );
+
+        for( i = gldl_shaders.count; i < gldl_shaders.size; ++i ) {
+            gldl_shaders.arr[i].id = -1;
+            gldl_shaders.arr[i].size = 0;
+            gldl_shaders.arr[i].src = NULL;
+            gldl_shaders.arr[i].next_free = i+1;
+        }
+        gldl_shaders.arr[i-1].next_free = -1;
+
+        gldl_shaders.first_free = index = gldl_shaders.count;
+    }
+
+    // add new shader
+    gldl_shaders.arr[index].id = id;
+    gldl_shaders.arr[index].type = type;
+    gldl_shaders.count++;
+
+    gldl_shaders.first_free = index = gldl_shaders.arr[index].next_free;
+}
+
+static void SetShaderSource( GLuint id, const char *src ) {
+    int i;
+    int len = strlen( src );
+
+    // search for shader in array
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            return;
+
+        if( gldl_shaders.arr[i].id == id ) {
+
+            // if already something, realloc
+            if( gldl_shaders.arr[i].src ) 
+                gldl_shaders.arr[i].src = realloc( gldl_shaders.arr[i].src, len );
+
+            // else, alloc
+            else
+                gldl_shaders.arr[i].src = calloc( 1, len );
+
+            strncpy( gldl_shaders.arr[i].src, src, len );
+            gldl_shaders.arr[i].size = len;
+        }
+    }
+}
+
+static void DeleteShader( GLuint id ) {
+    int i, tmp;
+
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        // if nothing more to see, return
+        if( gldl_shaders.arr[i].id == -1 )
+            return;
+
+        if( gldl_shaders.arr[i].id == id ) {
+            gldl_shaders.arr[i].id = 0;
+            free( gldl_shaders.arr[i].src );
+            gldl_shaders.arr[i].src = NULL;
+            gldl_shaders.arr[i].size = 0;
+
+            // reorganise array linking
+            tmp = gldl_shaders.first_free;
+            gldl_shaders.first_free = gldl_shaders.arr[i].next_free;
+            gldl_shaders.arr[i].next_free = tmp;
+
+            gldl_shaders.count--;
+
+            break;
+        }
+    }
+}
+
+static void AddProgram( GLuint id ) {
+    int i;
+    int index = gldl_programs.first_free;
+
+    if( -1 == index ) {
+        gldl_programs.arr[gldl_programs.size-1].next_free = gldl_programs.size;
+
+        gldl_programs.size *= 1.7;
+        gldl_programs.arr = realloc( gldl_programs.arr, sizeof(struct gldl_program) * gldl_programs.size );
+
+        for( i = gldl_programs.count; i < gldl_programs.size; ++i ) {
+            gldl_programs.arr[i].id = -1;
+            gldl_programs.arr[i].next_free = i+1;
+        }
+        gldl_programs.arr[i-1].next_free = -1;
+
+        gldl_programs.first_free = index = gldl_programs.count;
+    }
+
+    // add new program
+    gldl_programs.arr[index].id = id;
+    gldl_programs.count++;
+
+    gldl_programs.first_free = index = gldl_programs.arr[index].next_free;
+
+}
+
+static void DeleteProgram( GLuint id ) {
+    int i, tmp;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        // if nothing more to see, return
+        if( gldl_programs.arr[i].id == -1 )
+            return;
+
+        if( gldl_programs.arr[i].id == id ) {
+            gldl_programs.arr[i].id = 0;
+            gldl_programs.arr[i].vs = 0;
+            gldl_programs.arr[i].fs = 0;
+
+            // reorganise array linking
+            tmp = gldl_programs.first_free;
+            gldl_programs.first_free = gldl_programs.arr[i].next_free;
+            gldl_programs.arr[i].next_free = tmp;
+
+            // unbind this program if bound
+            if( gldl_programs.bound_program == id )
+                gldl_programs.bound_program = -1;
+
+            gldl_programs.count--;
+
+            break;
+        }
+    }
+}
+
+static void AttachShader( GLuint prog_id, GLuint shader_id ) {
+    int i;
+    int prog = -1;
+
+    // search program index
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            return;
+
+        if( gldl_programs.arr[i].id == prog_id ) {
+            prog = i;
+            break;
+        }
+    }
+
+    if( prog == -1 ) return;
+
+    // search shader
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            return;
+
+        if( gldl_shaders.arr[i].id == shader_id ) {
+            if( gldl_shaders.arr[i].type == GL_VERTEX_SHADER )
+                gldl_programs.arr[prog].vs = shader_id;
+            else if( gldl_shaders.arr[i].type == GL_FRAGMENT_SHADER )
+                gldl_programs.arr[prog].fs = shader_id;
+
+            break;
+        }
+    }
+}
+
+static void DetachShader( GLuint prog_id, GLuint shader_id ) {
+    int i;
+    int type = -1;
+
+    // search shader to detach
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            break;
+
+        if( gldl_shaders.arr[i].id == shader_id ) {
+            type = gldl_shaders.arr[i].type;
+            break;
+        }
+
+    }
+
+    if( type == -1 )
+        return;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            return;
+
+        if( gldl_programs.arr[i].id == prog_id ) {
+            if( type == GL_VERTEX_SHADER )
+                gldl_programs.arr[i].vs = 0;
+            else if( type == GL_FRAGMENT_SHADER )
+                gldl_programs.arr[i].fs = 0;
+            break;
+        }
+    }
+}
+
+static void BindProgram( GLuint id ) {
+    int i;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            return;
+
+        if( gldl_programs.arr[i].id == id ) {
+            gldl_programs.bound_program = id;
+            break;
+        }
+    }
+}
+
+static void ListPrograms() {
+    int i;
+    int got_one = 0;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            break;
+
+        if( gldl_programs.arr[i].id > 0 ) {
+            if( !got_one ) {
+                got_one = 1;
+                printf( "Shader Programs List :\n" );
+            }
+            printf( "%d\n", gldl_programs.arr[i].id );
+        }
+    }
+
+    if( !got_one ) 
+        printf( "No shader programs.\n" );
+}
+
+static void PrintProgram( int id ) {
+    int i;
+
+    for( i = 0; i < gldl_programs.size; ++i ) {
+        if( gldl_programs.arr[i].id == -1 )
+            break;
+
+        if( gldl_programs.arr[i].id == id ) {
+            printf( "Vertex Shader : %d\nFragment Shader : %d\n", gldl_programs.arr[i].vs, gldl_programs.arr[i].fs );
+            return;
+        }
+    }
+
+    printf( "This shader program does not exist.\n" );
+}
+
+static void ListShaders() {
+    int i;
+    int got_one = 0;
+
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            break;
+
+        if( gldl_shaders.arr[i].id > 0 ) {
+            if( !got_one ) {
+                got_one = 1;
+                printf( "Shaders List :\n" );
+            }
+            printf( "%d\n",  gldl_shaders.arr[i].id );
+        }
+    }
+
+    if( !got_one ) 
+        printf( "No shaders.\n" );
+}
+
+static void PrintShader( int id ) {
+    int i;
+
+    for( i = 0; i < gldl_shaders.size; ++i ) {
+        if( gldl_shaders.arr[i].id == -1 )
+            break;
+
+        if( gldl_shaders.arr[i].id == id ) {
+            if( !gldl_shaders.arr[i].src )
+                printf( "This shader has no source.\n" );
+            else
+                printf( "%s\n", gldl_shaders.arr[i].src );
+            return;
+        }
+    }
+
+    printf( "This shader does not exist.\n" );
+}
+
 
 // Store the used GL version in the gl_version struct
 // Returns 1 if Core Profile loaded correctly
@@ -705,9 +1098,16 @@ static void DebugFunction() {
         }
 
         // check for buffers listing
-        else if( !strcmp( cmd, "bl" ) || !strcmp( cmd, "buflist" ) ) {
-            PrintBuffers();
-        }
+        else if( !strcmp( cmd, "lb" ) || !strcmp( cmd, "listbuffer" ) ) 
+            ListBuffers();
+
+        // check for shaders listing
+        else if( !strcmp( cmd, "ls" ) || !strcmp( cmd, "listshaders" ) ) 
+            ListShaders();
+
+        // check for programs listing
+        else if( !strcmp( cmd, "lp" ) || !strcmp( cmd, "listprograms" ) ) 
+            ListPrograms();
 
         // check for break demand on GL function
         else if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
@@ -789,10 +1189,10 @@ static void DebugFunction() {
         }
 
         // print buffer data
-        else if( !strcmp( cmd, "bp" ) || !strcmp( cmd, "bufferprint" ) ) {
+        else if( !strcmp( cmd, "pb" ) || !strcmp( cmd, "printbuffer" ) ) {
             // check for param
             if( scan_ret < 2 ) {
-                printf( "Bufferprint usage : [b]uffer[p]rint buffer_id [type_size [elem_size]].\\n" );
+                printf( "Printbuffer usage : [p]rint[b]uffer buffer_id [type_size [elem_size]].\\n" );
                 continue;
             }
 
@@ -807,7 +1207,31 @@ static void DebugFunction() {
                     elem_size = atoi( params[2] );
             }
 
-            PrintBufferData( index, type_size, elem_size );
+            PrintBuffer( index, type_size, elem_size );
+        }
+
+        // print program data
+        else if( !strcmp( cmd, "pp" ) || !strcmp( cmd, "printprogram" ) ) {
+            // check for param
+            if( scan_ret != 2 ) {
+                printf( "Printprogram usage : [p]rint[p]rogram program_id.\\n" );
+                continue;
+            }
+
+            int id = atoi( params[0] );
+            PrintProgram( id );
+        }
+
+        // print shader data
+        else if( !strcmp( cmd, "ps" ) || !strcmp( cmd, "printshader" ) ) {
+            // check for param
+            if( scan_ret != 2 ) {
+                printf( "Printshader usage : [p]rint[s]hader shader_id.\\n" );
+                continue;
+            }
+
+            int id = atoi( params[0] );
+            PrintShader( id );
         }
 
         // open glfw
@@ -855,6 +1279,9 @@ def IsNumericParam( param ) :
 
 def IsNumericPtr( param ) :
     return param == "GLsizeiptr" or param == "GLintptr"
+
+def IsFloatParam( param ) :
+    return param == "GLfloat" or param == "GLclampf" or param == "GLdouble" or param == "GLclampd"
 
 # Write all GLDL functions
 for i in range( len(names) ) :
@@ -921,13 +1348,12 @@ for i in range( len(names) ) :
             elif IsNumericPtr( types[j] ) :
                 formats.append( "d" )
                 values.append( "(int)" + param_names[j] )
+            elif IsFloatParam( types[j] ) :
+                formats.append( "f" )
+                values.append( "(float)" + param_names[j] )
             else :
                 formats.append( "s" )
                 values.append( "arg" + str(j) )
-        print names[i]
-        print types
-        print formats
-        print values
 
         # print formats
         for j in range( parameters_n[i] - 1 ) :
@@ -968,7 +1394,7 @@ for i in range( len(names) ) :
    
     # Return the value of GL impl if needed
     if( return_types[i] != "void" ) :
-        gldl_c.write( "return " )
+        gldl_c.write( return_types[i] + " ret = " )
 
     gldl_c.write( "gldl" + names[i][2:] + "_impl( " )
     for j in range( parameters_n[i] - 1 ) :
@@ -989,7 +1415,29 @@ for i in range( len(names) ) :
     elif names[i] == "glBufferSubData" :
         gldl_c.write( "\tFillBuffer( data, size, offset, target == GL_ARRAY_BUFFER ? 0 : 1 );\n" )
 
+    # Handle Shader functions
+    elif names[i] == "glCreateShader" :
+        gldl_c.write( "\tAddShader( ret, type );\n" )
+    elif names[i] == "glDeleteShader" :
+        gldl_c.write( "\tDeleteShader( shader );\n" )
+    elif names[i] == "glCreateProgram" :
+        gldl_c.write( "\tAddProgram( ret );\n" )
+    elif names[i] == "glDeleteProgram" :
+        gldl_c.write( "\tDeleteProgram( program );\n" );
+    elif names[i] == "glShaderSource" :
+        gldl_c.write( "\tSetShaderSource( shader, string[0] );\n" );
+    elif names[i] == "glAttachShader" :
+        gldl_c.write( "\tAttachShader( program, shader );\n" );
+    elif names[i] == "glDetachShader" :
+        gldl_c.write( "\tDetachShader( program, shader );\n" );
+    elif names[i] == "glUseProgram" :
+        gldl_c.write( "\tBindProgram( program );\n" );
 
-    gldl_c.write( "}\n\n" )
+
+
+    if( return_types[i] != "void" ) :
+        gldl_c.write( "\treturn ret;\n" );
+
+    gldl_c.write( "}\n" )
     
 
