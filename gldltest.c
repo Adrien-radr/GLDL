@@ -1,11 +1,90 @@
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "GL/gldl.h"
 #include "GL/glfw.h"
 #include <GL/glx.h>
 
+void CheckGLError_func( const char *pFile, int pLine ) {
+#ifdef _DEBUG
+    GLenum error = glGetError();
+
+    if (error != GL_NO_ERROR) {
+        char errorStr[64];
+        char description[256];
+
+        switch (error)
+        {
+            case GL_INVALID_ENUM :
+            {
+                strncpy( errorStr, "GL_INVALID_ENUM", 64 );
+                strncpy( description, "An unacceptable value has been specified for an enumerated argument.", 256 );
+                break;
+            }
+
+            case GL_INVALID_VALUE :
+            {
+                strncpy( errorStr, "GL_INVALID_VALUE", 64 );
+                strncpy( description, "A numeric argument is out of range.", 256 );
+                break;
+            }
+
+            case GL_INVALID_OPERATION :
+            {
+                strncpy( errorStr, "GL_INVALID_OPERATION", 64 );
+                strncpy( description, "The specified operation is not allowed in the current state.", 256 );
+                break;
+            }
+
+            /*case GL_STACK_OVERFLOW :
+            {
+                strncpy( errorStr, "GL_STACK_OVERFLOW", 64 );
+                strncpy( description, "This command would cause a stack overflow.", 256 );
+                break;
+            }
+            case GL_STACK_UNDERFLOW :
+            {
+                strncpy( errorStr, "GL_STACK_UNDERFLOW", 64 );
+                strncpy( description, "This command would cause a stack underflow.", 256 );
+                break;
+            }
+
+            */
+            case GL_OUT_OF_MEMORY :
+            {
+                strncpy( errorStr, "GL_OUT_OF_MEMORY", 64 );
+                strncpy( description, "There is not enough memory left to execute the command.", 256 );
+                break;
+            }
+
+            case GL_INVALID_FRAMEBUFFER_OPERATION :
+            {
+                strncpy( errorStr, "GL_INVALID_FRAMEBUFFER_OPERATION_EXT", 64 );
+                strncpy( description, "The object bound to FRAMEBUFFER_BINDING is not \"framebuffer complete\".", 256 );
+                break;
+            }
+
+            default : 
+            {
+                strncpy( errorStr, "UNKNOWN", 64 );
+                strncpy( description, "Unknown GL Error", 256 );
+                break;
+            }
+        }
+
+        printf( "OpenGL Error (%s [%d])\n"
+                 "-- Error          : %s\n"
+                 "-- Description    : %s\n", pFile, pLine, errorStr, description );
+    }
+#endif
+}
+
+#   define CheckGLError() CheckGLError_func( __FILE__, __LINE__ )
+
+
 int main() {
-	int noerr = glfwInit();
+    int noerr;
+	noerr = glfwInit();
 
 	if( !noerr ) {
 		printf("GLFW Init error!\n");
@@ -96,14 +175,15 @@ int main() {
 
         while(run){
             gldlBeginTrace( 2 );
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            glDrawArrays( GL_TRIANGLES, 0, 6 );
 
             glfwSwapBuffers();
 
             run = !glfwGetKey(GLFW_KEY_ESC) && glfwGetWindowParam(GLFW_OPENED);
             gldlEndTrace( 2 );
         }
-
     }
 
     glfwTerminate();

@@ -1,1 +1,1 @@
-call<gldltest.c,45>: glClearColor( 1.000000, 0.800000, 0.000000, 1.000000 );
+call<gldltest.c,124>: glClearColor( 1.000000, 0.800000, 0.000000, 1.000000 );

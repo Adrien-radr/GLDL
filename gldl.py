@@ -225,20 +225,135 @@ gldl_c.write( r'''};
         return proc;
     }
 
-void ShowTexture() {
-    Display *dsp = glXGetCurrentDisplay();
-    GLXContext ctx = glXGetCurrentContext();
-    GLXDrawable drawable = glXGetCurrentDrawable();
+    // X11 Texture window stuff
+    static Display      *gldl_dpy = NULL;
+    static Window       gldl_win;
+    static Atom         gldl_closeEvent;
 
-    int success = glXMakeCurrent( dsp, None, NULL );
-    printf( "No context = %s\n", success > 0 ? "success" : "failure" );
+    // Client Window stuff
+    static Display      *cl_dpy;
+    static GLXDrawable  cl_win;
+    static GLXContext   cl_ctx;
+
+    int InitTextureWindow() {
+        int                     success = 0;
+        Window                  root;
+        GLint                   attr[] = { GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None };
+        XVisualInfo             *vi;
+        XSetWindowAttributes    swa;
+        XSizeHints              *sh;
+        
+        
+        cl_dpy = glXGetCurrentDisplay();
+        cl_ctx = glXGetCurrentContext();
+        cl_win = glXGetCurrentDrawable();
+
+        gldl_dpy = XOpenDisplay( NULL );
+
+        if( !gldl_dpy ) {
+            printf( "Cannot connect to X Server\n" );
+            return 0;
+        }
+
+        root = DefaultRootWindow( gldl_dpy );
+        vi = glXChooseVisual( gldl_dpy, 0, attr );
+
+        if( !vi ) {
+            printf( "No matching visual for RGBA:24 with double buffer.\n" );
+            XCloseDisplay( gldl_dpy );
+            return 0;
+        }
 
 
-    // CREATE NEW DRAWABLE TO SHOW TEXTURE
+        swa.colormap = XCreateColormap( gldl_dpy, root, vi->visual, AllocNone );
+        swa.event_mask = ExposureMask | KeyReleaseMask;
 
-    success = glXMakeCurrent( dsp, drawable, ctx );
-    printf( "GLFW context = %s\n", success > 0 ? "success" : "failure" );
-}
+        gldl_win = XCreateWindow( gldl_dpy, root, 0, 0, 320, 240, 0, vi->depth, 
+                                  InputOutput, vi->visual, CWColormap | CWEventMask, &swa );
+
+        XFree( vi );
+
+        // fixed aspect ratio (texture aspect ratio)
+        sh = XAllocSizeHints();
+
+        sh->flags = PAspect;
+        sh->min_aspect.x = 320;
+        sh->max_aspect.x = sh->min_aspect.x;
+        sh->min_aspect.y = 240;
+        sh->max_aspect.y = sh->min_aspect.y;
+
+        XSetWMNormalHints( gldl_dpy, gldl_win, sh );
+
+        XFree( sh );
+
+        // handle closing signals
+        gldl_closeEvent = XInternAtom( gldl_dpy, "WM_DELETE_WINDOW", False );
+        XSetWMProtocols( gldl_dpy, gldl_win, &gldl_closeEvent, 1 );
+
+        XStoreName( gldl_dpy, gldl_win, "GLDL" );
+
+        // Open created window
+        XMapWindow( gldl_dpy, gldl_win );
+
+        success = glXMakeCurrent( gldl_dpy, gldl_win, cl_ctx );
+
+        if( success )
+            printf( "GL context attached to GLDL window.\n" );
+        else 
+            printf( "Failed to attach GL context to GLDL window.\n" );
+
+        return success;
+    }
+
+    int TextureWindowEvents() {
+        static XEvent xev;
+        static KeySym key;
+
+        XNextEvent( gldl_dpy, &xev );
+
+        // check for keypress ( ESC key kills window )
+        if( xev.type == KeyRelease ) {
+            key = XKeycodeToKeysym( gldl_dpy, xev.xkey.keycode, 0 );
+
+            // only check for escape key
+            if( key == XK_Escape ) 
+                return 0;
+        }
+
+        // check for Closing signal
+        else if( xev.type == ClientMessage ) {
+            if( (Atom) xev.xclient.data.l[0] == gldl_closeEvent ) {
+                return 0;
+            }
+        }
+
+        // check for resizing
+        else if( xev.type == Expose ) {
+            // get new window size
+            XWindowAttributes wa;
+            XGetWindowAttributes( gldl_dpy, gldl_win, &wa );
+
+            glViewport( 0, 0, wa.width, wa.height );
+        }
+
+        return 1;
+    }
+
+    void SwapTextureWindow() {
+        glXSwapBuffers( gldl_dpy, gldl_win );
+    }
+
+    void DestroyTextureWindow() {
+        int success = glXMakeCurrent( cl_dpy, cl_win, cl_ctx );
+        if( success )
+            printf( "GL context back to client window.\n" );
+        else 
+            printf( "Failed to move GL context back to client window.\n" );
+
+        XUnmapWindow( gldl_dpy, gldl_win );
+        XDestroyWindow( gldl_dpy, gldl_win );
+        XCloseDisplay( gldl_dpy );
+    }
 #endif
 
 
@@ -337,7 +452,6 @@ static void PrintBuffer( int id, unsigned int type_size, unsigned int elem_size 
 static void InitShaderArray();
 static void DeleteShaderArray();
 static void AddShader( GLuint id, GLenum type );
-static void DeleteShader( GLuint id );
 static void SetShaderSource( GLuint id, const char *src );
 static void AddProgram( GLuint id );
 static void DeleteProgram( GLuint id );
@@ -350,7 +464,8 @@ static void PrintProgram( int id );
 static void ListShaders();
 static void PrintShader( int id );
 
-
+// GLDL Texture functions
+static void ShowTexture( GLuint id );
 
 
 static int  GetGLVersion();
@@ -373,8 +488,6 @@ int gldlInit() {
         gldl_traces[0].f = fopen( "trace_init.log", "w" );
         gldl_traces[0].started = 1;
 
-        //InitBufferArray();
-        //InitShaderArray();
         gldl_buffers.size = 0;
         gldl_programs.size = 0;
         gldl_shaders.size = 0;
@@ -414,6 +527,179 @@ void gldlEndTrace( unsigned int trace_n ) {
 }
 
 // Private functions
+
+void ShowTexture( GLuint id ) {
+    // search if id exists
+    int exists = 0;
+    int i;
+
+    if( !InitTextureWindow() ) 
+        return;
+
+    GLenum err = glGetError();
+    if( err != GL_NO_ERROR ) {
+        printf( "error at begin!\n" );
+    }
+
+    // shader for rendering
+    static const GLchar *vs_src = "\
+        #version 150                                            \n\
+        in  vec2 inPosition;                                    \n\
+        out vec2 fsTexcoord;                                    \n\
+                                                                \n\
+        void main() {                                           \n\
+            fsTexcoord = inPosition * vec2(0.5) + vec2(0.5);    \n\
+            gl_Position = vec4( inPosition, 0, 1 );             \n\
+        } ";
+
+    static const GLchar *fs_src = "\
+        #version 150                                            \n\
+        in  vec2 fsTexcoord;                                    \n\
+        out vec4 outColor;                                      \n\
+        uniform sampler2D tex;                                  \n\
+                                                                \n\
+        void main() {                                           \n\
+            outColor = texture( tex, fsTexcoord );              \n\
+        } ";
+
+    int shader_ok = 0;
+    int prog = gldlCreateProgram_impl();
+    int vs = gldlCreateShader_impl( GL_VERTEX_SHADER );
+    int fs = gldlCreateShader_impl( GL_FRAGMENT_SHADER );
+
+    gldlShaderSource_impl( vs, 1, &vs_src, NULL );
+    gldlCompileShader_impl( vs );
+    gldlGetShaderiv_impl( vs, GL_COMPILE_STATUS, &shader_ok );
+
+    if( !shader_ok ) {
+        printf( "vs error\n" );
+        GLint log_length;
+        char *log;
+
+        gldlGetShaderiv_impl( vs, GL_INFO_LOG_LENGTH, &log_length );
+        log = malloc( log_length );
+        gldlGetShaderInfoLog_impl( vs, log_length, NULL, log );
+        printf( "%s", log );
+        free(log);
+
+        goto error;
+    }
+
+    gldlShaderSource_impl( fs, 1, &fs_src, NULL );
+    gldlCompileShader_impl( fs );
+    gldlGetShaderiv_impl( fs, GL_COMPILE_STATUS, &shader_ok );
+
+    if( !shader_ok ) {
+        printf( "fs error\n" );
+        GLint log_length;
+        char *log;
+
+        gldlGetShaderiv_impl( fs, GL_INFO_LOG_LENGTH, &log_length );
+        log = malloc( log_length );
+        gldlGetShaderInfoLog_impl( fs, log_length, NULL, log );
+        printf( "%s", log );
+        free(log);
+
+        goto error;
+    }
+
+    gldlAttachShader_impl( prog, vs );
+    gldlAttachShader_impl( prog, fs );
+    gldlLinkProgram_impl( prog );
+
+    gldlGetProgramiv_impl( prog, GL_LINK_STATUS, &shader_ok );
+
+    if( !shader_ok ) {
+        printf( "prog error\n" );
+        GLint log_length;
+        char *log;
+
+        gldlGetProgramiv_impl( prog, GL_INFO_LOG_LENGTH, &log_length );
+        log = malloc( log_length );
+        gldlGetProgramInfoLog_impl( prog, log_length, NULL, log );
+        printf( "%s", log );
+        free(log);
+        goto error;
+    }
+
+    gldlUseProgram_impl( prog );
+
+    int tex_uniform = gldlGetUniformLocation_impl( prog, "tex" );
+    int pos_attrib = gldlGetAttribLocation_impl( prog, "inPosition" );
+
+    gldlUniform1i_impl( tex_uniform, 0 );
+
+    // mesh for texture displaying
+    static const GLfloat mesh[] = {
+        -1.f, -1.f,
+         1.f, -1.f,
+        -1.f,  1.f,
+
+        -1.f,  1.f,
+         1.f, -1.f,
+         1.f,  1.f
+    };
+
+    GLuint vbo;
+    gldlGenBuffers_impl( 1, &vbo );
+    gldlBindBuffer_impl( GL_ARRAY_BUFFER, vbo );
+    gldlBufferData_impl( GL_ARRAY_BUFFER, sizeof(mesh), mesh, GL_STATIC_DRAW );
+
+    gldlEnableVertexAttribArray_impl( pos_attrib );
+    gldlDisableVertexAttribArray_impl( 1 );
+    gldlVertexAttribPointer_impl( pos_attrib, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), 0 );
+
+    
+    gldlActiveTexture_impl( GL_TEXTURE0 );
+    gldlBindTexture_impl( GL_TEXTURE_2D, id );
+
+    // disable not needed states
+    gldlDisable_impl( GL_DEPTH_TEST );
+    gldlDisable_impl( GL_CULL_FACE );
+
+    // get current viewport, to restore it later
+    GLint viewport[4];
+    gldlGetIntegerv_impl( GL_VIEWPORT, viewport );
+
+    gldlViewport_impl( 0, 0, 320, 240 );
+
+    int run = 1;
+
+    while( run ) {
+        gldlClear_impl( GL_COLOR_BUFFER_BIT );
+
+        gldlDrawArrays_impl( GL_TRIANGLES, 0, 6 );
+        
+        SwapTextureWindow();
+
+        run = TextureWindowEvents();
+    }
+
+    // restore modified states
+    gldlEnable_impl( GL_CULL_FACE );
+    gldlEnable_impl( GL_DEPTH_TEST );
+    gldlViewport_impl( viewport[0], viewport[1], viewport[2], viewport[3] );
+
+    err = glGetError();
+    if( err != GL_NO_ERROR ) {
+        printf( "error at end!\n" );
+    }
+
+error:
+    gldlUseProgram_impl( gldl_programs.bound_program );
+    gldlBindBuffer_impl( GL_ARRAY_BUFFER, gldl_buffers.bound_array_b );
+
+    gldlDeleteBuffers_impl( 1, &vbo );
+    gldlDeleteShader_impl( vs );
+    gldlDeleteShader_impl( fs );
+    gldlDeleteProgram_impl( prog );
+        
+    DestroyTextureWindow();
+    err = glGetError();
+    if( err != GL_NO_ERROR ) {
+        printf( "error at goto end!\n" );
+    }
+}
 
 // Initialize gldl_buffers
 static void InitBufferArray() {
@@ -625,17 +911,18 @@ static void PrintBuffer( int id, unsigned int type_size, unsigned int elem_size 
                             printf( "err }\nError : given elem_size and type_size are not compatible with buffer size.\n" );
                             return;
                         }
+                        printf( "\n" );
 
                         for( j = 0; j < array_size - type_size; j += type_size ) {
-                            printf( " { " );
+                            printf( "\t{ " );
                             for( k = 0; k < type_size - 1; ++k )
                                 printf( "%.2f, ", gldl_buffers.arr[i].data[j+k] );
-                            printf( "%.2f }, ", gldl_buffers.arr[i].data[j+k] );
+                            printf( "%.2f },\n", gldl_buffers.arr[i].data[j+k] );
                         }
-                        printf( " { " );
+                        printf( "\t{ " );
                         for( k = 0; k < type_size - 1; ++k )
                             printf( "%.2f, ", gldl_buffers.arr[i].data[j+k] );
-                        printf( "%.2f } }\n", gldl_buffers.arr[i].data[j+k] );
+                        printf( "%.2f } \n}\n", gldl_buffers.arr[i].data[j+k] );
                     }
                 } else
                     printf( " }\n" );
@@ -768,32 +1055,6 @@ static void SetShaderSource( GLuint id, const char *src ) {
     }
 }
 
-static void DeleteShader( GLuint id ) {
-    int i, tmp;
-
-    for( i = 0; i < gldl_shaders.size; ++i ) {
-        // if nothing more to see, return
-        if( gldl_shaders.arr[i].id == -1 )
-            return;
-
-        if( gldl_shaders.arr[i].id == id ) {
-            gldl_shaders.arr[i].id = 0;
-            free( gldl_shaders.arr[i].src );
-            gldl_shaders.arr[i].src = NULL;
-            gldl_shaders.arr[i].size = 0;
-
-            // reorganise array linking
-            tmp = gldl_shaders.first_free;
-            gldl_shaders.first_free = gldl_shaders.arr[i].next_free;
-            gldl_shaders.arr[i].next_free = tmp;
-
-            gldl_shaders.count--;
-
-            break;
-        }
-    }
-}
-
 static void AddProgram( GLuint id ) {
     int i;
     int index = gldl_programs.first_free;
@@ -882,9 +1143,9 @@ static void AttachShader( GLuint prog_id, GLuint shader_id ) {
 
         if( gldl_shaders.arr[i].id == shader_id ) {
             if( gldl_shaders.arr[i].type == GL_VERTEX_SHADER )
-                gldl_programs.arr[prog].vs = shader_id;
+                gldl_programs.arr[prog].vs = i+1;
             else if( gldl_shaders.arr[i].type == GL_FRAGMENT_SHADER )
-                gldl_programs.arr[prog].fs = shader_id;
+                gldl_programs.arr[prog].fs = i+1;
 
             break;
         }
@@ -988,7 +1249,7 @@ static void ListShaders() {
                 got_one = 1;
                 printf( "Shaders List :\n" );
             }
-            printf( "%d\n",  gldl_shaders.arr[i].id );
+            printf( "%d\n",  i+1 );
         }
     }
 
@@ -996,7 +1257,15 @@ static void ListShaders() {
         printf( "No shaders.\n" );
 }
 
-static void PrintShader( int id ) {
+static void PrintShader( int index ) {
+    if( gldl_shaders.arr[index-1].id == -1 )
+        printf( "This shader does not exist.\n" );
+    else if( !gldl_shaders.arr[index-1].src )
+        printf( "This shader has no source.\n" );
+    else
+        printf( "\n%s\n", gldl_shaders.arr[index-1].src );
+
+/*
     int i;
 
     for( i = 0; i < gldl_shaders.size; ++i ) {
@@ -1004,15 +1273,10 @@ static void PrintShader( int id ) {
             break;
 
         if( gldl_shaders.arr[i].id == id ) {
-            if( !gldl_shaders.arr[i].src )
-                printf( "This shader has no source.\n" );
-            else
-                printf( "\n%s\n", gldl_shaders.arr[i].src );
             return;
         }
     }
-
-    printf( "This shader does not exist.\n" );
+*/
 }
 
 
@@ -1251,8 +1515,15 @@ static void DebugFunction() {
         }
 
         // open glfw
-        else if( !strcmp( cmd, "glfw" ) ) {
-            ShowTexture();
+        else if( !strcmp( cmd, "pt" ) || !strcmp( cmd, "printtexture" ) ) {
+            // check for param
+            if( scan_ret != 2 ) {
+                printf( "Printtexture usage : [p]rint[t]exture texture_id.\\n" );
+                continue;
+            }
+
+            int id = atoi( params[0] );
+            ShowTexture( id );
         }
 
         // no match, show help
@@ -1301,6 +1572,10 @@ def IsFloatParam( param ) :
 
 # Write all GLDL functions
 for i in range( len(names) ) :
+    # printf-like formats for function params
+    formats = []
+    values = []
+
     # get function param names
     param_names = parameters[i].split( "," )
     for j in range( len(param_names) ) :
@@ -1320,9 +1595,31 @@ for i in range( len(names) ) :
             for type_n in spl[1:-1] :
                 type_name = type_name + " " + type_n
             types.append( type_name )
+            
+            # Fill formats and format_value arrays (used when writing trace)
+            if IsNumericParam( types[j] ) : 
+                formats.append( "d" )
+                values.append( param_names[j] )
+            elif IsNumericPtr( types[j] ) :
+                formats.append( "d" )
+                values.append( "(int)" + param_names[j] )
+            elif IsFloatParam( types[j] ) :
+                formats.append( "f" )
+                values.append( "(float)" + param_names[j] )
+            # pointer, show pointer address
+            elif types[j][-1] == "*" :
+                formats.append( "p" )
+                values.append( param_names[j] )
+            else :
+                formats.append( "s" )
+                values.append( "arg" + str(j) )
         else :
             types.append( "" )
         
+    print types
+    print formats
+    print values
+
     
 
     # Write signature
@@ -1344,10 +1641,6 @@ for i in range( len(names) ) :
     ''' )
 
 
-    # printf-like formats for function params
-    formats = []
-    values = []
-
     # Write traces
     gldl_c.write( r'''    int i;
     for( i = 0; i < TRACE_N; ++i ) 
@@ -1357,19 +1650,6 @@ for i in range( len(names) ) :
         gldl_c.write( ");\\n\", file, line );\n" )
     else :
         # get format to print params
-        for j in range( parameters_n[i] ) :
-            if IsNumericParam( types[j] ) : 
-                formats.append( "d" )
-                values.append( param_names[j] )
-            elif IsNumericPtr( types[j] ) :
-                formats.append( "d" )
-                values.append( "(int)" + param_names[j] )
-            elif IsFloatParam( types[j] ) :
-                formats.append( "f" )
-                values.append( "(float)" + param_names[j] )
-            else :
-                formats.append( "s" )
-                values.append( "arg" + str(j) )
 
         # print formats
         for j in range( parameters_n[i] - 1 ) :
@@ -1434,8 +1714,6 @@ for i in range( len(names) ) :
     # Handle Shader functions
     elif names[i] == "glCreateShader" :
         gldl_c.write( "\tAddShader( ret, type );\n" )
-    elif names[i] == "glDeleteShader" :
-        gldl_c.write( "\tDeleteShader( shader );\n" )
     elif names[i] == "glCreateProgram" :
         gldl_c.write( "\tAddProgram( ret );\n" )
     elif names[i] == "glDeleteProgram" :
