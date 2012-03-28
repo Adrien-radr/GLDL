@@ -3,7 +3,7 @@ import re
 import urllib2
 import os
 
-print "GLDL gen script 0.5"
+print "GLDL gen script 1.0"
 
 # Make folder hierarchy
 #   GL/         --  GL3/    --  gl3.h
@@ -235,7 +235,7 @@ gldl_c.write( r'''};
     static GLXDrawable  cl_win;
     static GLXContext   cl_ctx;
 
-    int InitTextureWindow() {
+    int InitTextureWindow( int width, int height ) {
         int                     success = 0;
         Window                  root;
         GLint                   attr[] = { GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None };
@@ -268,7 +268,7 @@ gldl_c.write( r'''};
         swa.colormap = XCreateColormap( gldl_dpy, root, vi->visual, AllocNone );
         swa.event_mask = ExposureMask | KeyReleaseMask;
 
-        gldl_win = XCreateWindow( gldl_dpy, root, 0, 0, 320, 240, 0, vi->depth, 
+        gldl_win = XCreateWindow( gldl_dpy, root, 0, 0, width, height, 0, vi->depth, 
                                   InputOutput, vi->visual, CWColormap | CWEventMask, &swa );
 
         XFree( vi );
@@ -277,9 +277,9 @@ gldl_c.write( r'''};
         sh = XAllocSizeHints();
 
         sh->flags = PAspect;
-        sh->min_aspect.x = 320;
+        sh->min_aspect.x = width;
         sh->max_aspect.x = sh->min_aspect.x;
-        sh->min_aspect.y = 240;
+        sh->min_aspect.y = height;
         sh->max_aspect.y = sh->min_aspect.y;
 
         XSetWMNormalHints( gldl_dpy, gldl_win, sh );
@@ -365,7 +365,7 @@ static int  gldl_init = 0;                  // Assure that gldl has been init
 
 static int  break_functions[GLDL_FUNC_N];   // Breakpoints storing array
 static int  break_next = 0;                 // Break on next function ?
-static char debug_break[10];                // Used to display break cause
+static char debug_break[10];                // Used to display break cause (breakpoint nb or a 'n' break)
 
 // GL function call traces
 // First trace is the init trace (trace until first glClear())
@@ -376,7 +376,7 @@ static struct s_ct {
     int         started;
 } gldl_traces[TRACE_N];
 
-// GL Buffers
+// Buffers (VBO) managment
 struct gldl_buffer {
     GLint       id;
     GLuint      size;
@@ -395,7 +395,9 @@ static struct {
     int                 bound_elem_array_b;
 } gldl_buffers;
 
-// GL shader
+
+
+// Shaders and Shader Programs managment
 struct gldl_shader {
     GLuint      id;         // Shader GL id
     GLenum      type;       // GL_{VERTEX,FRAGMENT}_SHADER
@@ -406,7 +408,6 @@ struct gldl_shader {
     int         next_free;
 };
 
-// GL program
 struct gldl_program {
     GLuint      id;         // Program GL id
     GLuint      vs, fs;     // Program linked vertex and fragment shaders ids
@@ -431,6 +432,45 @@ static struct {
 } gldl_programs;
 
 
+
+// Texture managment
+struct gldl_texture {
+    GLuint      id;
+    GLuint      width, height;
+
+    int         next_free;
+};
+
+static struct {
+    struct gldl_texture     *arr;
+    unsigned int            size;
+    unsigned int            count;
+    unsigned int            first_free;
+
+    unsigned int            bound_textures[8];
+    unsigned int            current_unit;
+} gldl_textures;
+
+
+
+// States managment
+static struct {
+    int     depth_test,
+            blend,
+            blendfunc_src,
+            blendfunc_dest,
+            face_culling,
+            culled_face;
+
+    int     mag_filter,
+            min_filter,
+            wrap_s,
+            wrap_t;
+} gldl_states;
+
+
+
+// OpenGL max available version
 static struct {
     GLint       major,
                 minor;
@@ -465,13 +505,26 @@ static void ListShaders();
 static void PrintShader( int id );
 
 // GLDL Texture functions
-static void ShowTexture( GLuint id );
+static void InitTextureArray();
+static void DeleteTextureArray();
+static void AddTextures( GLsizei n, GLuint *ids );
+static void DeleteTextures( GLsizei n, const GLuint *ids );
+static void SetTextureSize( GLuint id, GLuint width, GLuint height );
+static void BindTexture( GLuint id );
+static void SetTextureUnit( GLuint unit );
+static void ShowTexture( GLuint id, int reverse );
 
 
+static void InitGLStates();
 static int  GetGLVersion();
 static void DebugTest( int func_index );
 static void DebugFunction();
 static void LoadProcs();
+
+
+
+
+
 
 
 // Public functions
@@ -492,7 +545,11 @@ int gldlInit() {
         gldl_programs.size = 0;
         gldl_shaders.size = 0;
 
+        InitGLStates();
+
         memset( break_functions, -1, GLDL_FUNC_N * sizeof(int) );
+
+        printf( "GLDL 1.0\n" );
         DebugFunction();
     }
     
@@ -526,29 +583,221 @@ void gldlEndTrace( unsigned int trace_n ) {
     gldl_traces[trace_n].started = 0;
 }
 
+
+
+
+
+
+
+
+
 // Private functions
 
-void ShowTexture( GLuint id ) {
-    // search if id exists
-    int exists = 0;
+
+
+static void InitTextureArray() {
+    // initialize with 20 elem at first
+    gldl_textures.size = 20;
+    gldl_textures.count = 0;
+    gldl_textures.first_free = 0;
+    memset( gldl_textures.bound_textures, 0, 8 * sizeof(int) );
+    gldl_textures.current_unit = 0;
+
+    gldl_textures.arr = calloc( gldl_textures.size, sizeof(struct gldl_texture) );
+    
+    int i;
+    for( i = 0; i < gldl_textures.size; ++i ) {
+        gldl_textures.arr[i].id = -1;
+        gldl_textures.arr[i].width = 0;
+        gldl_textures.arr[i].height = 0;
+        gldl_textures.arr[i].next_free = i+1;
+    }
+    gldl_textures.arr[gldl_textures.size-1].next_free = -1;
+}
+
+static void DeleteTextureArray() {
+    free( gldl_textures.arr );
+    gldl_textures.size = 0;
+}
+
+static void AddTextures( GLsizei n, GLuint *ids ) {
+    int i, new_index;
+    int index = gldl_textures.first_free;
+    int need_realloc = 0;
+
+    // init arrays if not yet done
+    if( !gldl_textures.size ) 
+        InitTextureArray();
+
+    // realloc array if full (with 1.7x policy)
+    for( new_index = n-1; new_index >= 0; --new_index ) {
+        if( -1 == index ) {
+            need_realloc = 1;
+            break;
+        }
+
+        index = gldl_textures.arr[index].next_free;
+    }
+
+    index = gldl_textures.first_free;
+
+    if( need_realloc ) {
+        gldl_textures.arr[gldl_textures.size-1].next_free = gldl_textures.size;
+
+        gldl_textures.size *= 1.7;
+        gldl_textures.arr = realloc( gldl_textures.arr, sizeof(struct gldl_texture) * gldl_textures.size );
+
+        for( i = gldl_textures.count; i < gldl_textures.size; ++i ) {
+            gldl_textures.arr[i].id = -1;
+            gldl_textures.arr[i].width = 0;
+            gldl_textures.arr[i].height = 0;
+            gldl_textures.arr[i].next_free = i+1;
+        }
+        gldl_textures.arr[gldl_textures.size-1].next_free = -1;
+
+        // change first_free only if new_index is far
+        if( new_index == 0 )
+            gldl_textures.first_free = index = gldl_textures.count;
+    }
+
+    // add new textures id
+    for( i = 0; i < n; ++i ) {
+        gldl_textures.arr[index].id = ids[i];
+        gldl_textures.count++;
+
+        gldl_textures.first_free = index = gldl_textures.arr[index].next_free;
+    }
+}
+
+static void DeleteTextures( GLsizei n, const GLuint *ids ) {
+    int cpt;
+    int i, j;
+    int tmp;
+
+    for( cpt = 0; cpt < n; ++cpt ) {
+        for( i = 0; i < gldl_textures.size; ++i ) {
+            // if nothing more to see, return
+            if( gldl_textures.arr[i].id == -1 )
+                return;
+
+            if( gldl_textures.arr[i].id == ids[cpt] ) {
+                // delete textures memory
+                gldl_textures.arr[i].id = 0;
+
+                // reorganise array linking
+                tmp = gldl_textures.first_free;
+                gldl_textures.first_free = gldl_textures.arr[i].next_free;
+                gldl_textures.arr[i].next_free = tmp;
+
+                // unbind this texture if bound
+                for( j = 0; j < 8; ++j )
+                    if( gldl_textures.arr[i].id == gldl_textures.bound_textures[j] )
+                        gldl_textures.bound_textures[j] = 0;
+
+                gldl_textures.count--;
+
+                break;
+            }
+        }
+    }
+
+    // If no more textures, destroy array
+    if( !gldl_textures.count )
+        DeleteTextureArray();
+
+}
+
+static void SetTextureSize( GLuint id, GLuint width, GLuint height ) {
     int i;
 
-    if( !InitTextureWindow() ) 
+    for( i = 0; i < gldl_textures.size; ++i ) {
+        if( gldl_textures.arr[i].id == -1 )
+            return;
+
+        if( gldl_textures.arr[i].id == id ) {
+            gldl_textures.arr[i].width = width;
+            gldl_textures.arr[i].height = height;
+            break;
+        }
+    }   
+}
+
+static void BindTexture( GLuint id ) {
+    int i;
+
+    for( i = 0; i < gldl_textures.size; ++i ) {
+        if( gldl_textures.arr[i].id == -1 )
+            return;
+
+        if( gldl_textures.arr[i].id == id ) {
+            gldl_textures.bound_textures[gldl_textures.current_unit] = id;
+            break;
+        }
+    }   
+}
+
+static void SetTextureUnit( GLuint unit ) {
+    GLuint real_unit = unit - GL_TEXTURE0;
+
+    if( real_unit < 8 )
+        gldl_textures.current_unit = real_unit;
+}
+
+
+void ShowTexture( GLuint id, int reverse ) {
+    int tex_index = -1;
+    int i;
+    int tex_w, tex_h;
+
+    // check if given id is 
+    for( i = 0; i < gldl_textures.size; ++i ) {
+        if( gldl_textures.arr[i].id == -1 )
+            break;
+
+        if( gldl_textures.arr[i].id == id ) {
+            if( gldl_textures.arr[i].width != 0 && gldl_textures.arr[i].height != 0 )
+                tex_index = i;
+            break;
+        }
+    }
+
+    if( tex_index < 0 ) {
+        printf( "This texture does not exist.\n" );
+        return;
+    }
+
+
+    tex_w = gldl_textures.arr[tex_index].width;
+    tex_h = gldl_textures.arr[tex_index].height;
+
+    printf( "Displaying texture %d ( w = %d, h = %d )...\n", id, tex_w, tex_h );
+
+
+    // limit popup window size to be less than 800x600
+    // the user will be able to rescale it after pop
+    while( tex_w > 800 )
+        tex_w /= 2;
+
+    while( tex_h > 600 )
+        tex_h /= 2;
+
+
+
+    // Init platform window to draw on
+    if( !InitTextureWindow( tex_w, tex_h ) ) 
         return;
 
-    GLenum err = glGetError();
-    if( err != GL_NO_ERROR ) {
-        printf( "error at begin!\n" );
-    }
 
     // shader for rendering
     static const GLchar *vs_src = "\
         #version 150                                            \n\
-        in  vec2 inPosition;                                    \n\
-        out vec2 fsTexcoord;                                    \n\
+        in  vec2    inPosition;                                 \n\
+        out vec2    fsTexcoord;                                 \n\
+        uniform int reverse;                                    \n\
                                                                 \n\
         void main() {                                           \n\
             fsTexcoord = inPosition * vec2(0.5) + vec2(0.5);    \n\
+            if( reverse > 0 ) fsTexcoord.y = -fsTexcoord.y;     \n\
             gl_Position = vec4( inPosition, 0, 1 );             \n\
         } ";
 
@@ -572,7 +821,7 @@ void ShowTexture( GLuint id ) {
     gldlGetShaderiv_impl( vs, GL_COMPILE_STATUS, &shader_ok );
 
     if( !shader_ok ) {
-        printf( "vs error\n" );
+        printf( "Vertex Shader compilation error\n" );
         GLint log_length;
         char *log;
 
@@ -590,7 +839,7 @@ void ShowTexture( GLuint id ) {
     gldlGetShaderiv_impl( fs, GL_COMPILE_STATUS, &shader_ok );
 
     if( !shader_ok ) {
-        printf( "fs error\n" );
+        printf( "Fragment Shader compilation error\n" );
         GLint log_length;
         char *log;
 
@@ -610,7 +859,7 @@ void ShowTexture( GLuint id ) {
     gldlGetProgramiv_impl( prog, GL_LINK_STATUS, &shader_ok );
 
     if( !shader_ok ) {
-        printf( "prog error\n" );
+        printf( "Shader Program linking error\n" );
         GLint log_length;
         char *log;
 
@@ -622,12 +871,17 @@ void ShowTexture( GLuint id ) {
         goto error;
     }
 
+    gldlDeleteShader_impl( vs );
+    gldlDeleteShader_impl( fs );
+
     gldlUseProgram_impl( prog );
 
     int tex_uniform = gldlGetUniformLocation_impl( prog, "tex" );
+    int reverse_uniform = gldlGetUniformLocation_impl( prog, "reverse" );
     int pos_attrib = gldlGetAttribLocation_impl( prog, "inPosition" );
 
     gldlUniform1i_impl( tex_uniform, 0 );
+    gldlUniform1i_impl( reverse_uniform, reverse > 0 ? 1 : 0 );
 
     // mesh for texture displaying
     static const GLfloat mesh[] = {
@@ -661,7 +915,8 @@ void ShowTexture( GLuint id ) {
     GLint viewport[4];
     gldlGetIntegerv_impl( GL_VIEWPORT, viewport );
 
-    gldlViewport_impl( 0, 0, 320, 240 );
+    gldlViewport_impl( 0, 0, tex_w, tex_h );
+
 
     int run = 1;
 
@@ -680,25 +935,26 @@ void ShowTexture( GLuint id ) {
     gldlEnable_impl( GL_DEPTH_TEST );
     gldlViewport_impl( viewport[0], viewport[1], viewport[2], viewport[3] );
 
-    err = glGetError();
+    GLenum err = glGetError();
     if( err != GL_NO_ERROR ) {
         printf( "error at end!\n" );
     }
 
-error:
+    // get back to previously bound objects
     gldlUseProgram_impl( gldl_programs.bound_program );
     gldlBindBuffer_impl( GL_ARRAY_BUFFER, gldl_buffers.bound_array_b );
 
+    // go back to previously bound texture for unit 0
+    gldlBindTexture_impl( GL_TEXTURE_2D, gldl_textures.bound_textures[0] );
+
+    // go back to previous unit
+    gldlActiveTexture_impl( GL_TEXTURE0 + gldl_textures.current_unit );
+
     gldlDeleteBuffers_impl( 1, &vbo );
-    gldlDeleteShader_impl( vs );
-    gldlDeleteShader_impl( fs );
     gldlDeleteProgram_impl( prog );
         
+error:
     DestroyTextureWindow();
-    err = glGetError();
-    if( err != GL_NO_ERROR ) {
-        printf( "error at goto end!\n" );
-    }
 }
 
 // Initialize gldl_buffers
@@ -707,8 +963,8 @@ static void InitBufferArray() {
     gldl_buffers.size = 20;
     gldl_buffers.count = 0;
     gldl_buffers.first_free = 0;
-    gldl_buffers.bound_array_b = -1;
-    gldl_buffers.bound_elem_array_b = -1;
+    gldl_buffers.bound_array_b = 0;
+    gldl_buffers.bound_elem_array_b = 0;
 
     gldl_buffers.arr = calloc( gldl_buffers.size, sizeof(struct gldl_buffer) );
     
@@ -807,9 +1063,9 @@ static void DeleteBuffers( GLsizei n, const GLuint *ids ) {
 
                 // unbind this buffer if bound
                 if( gldl_buffers.bound_array_b == ids[cpt] )
-                    gldl_buffers.bound_array_b = -1;
+                    gldl_buffers.bound_array_b = 0;
                 if( gldl_buffers.bound_elem_array_b == ids[cpt] )
-                    gldl_buffers.bound_elem_array_b = -1;
+                    gldl_buffers.bound_elem_array_b = 0;
 
                 gldl_buffers.count--;
 
@@ -846,6 +1102,7 @@ static void BindBuffer( GLuint id, int elem_array ) {
                 gldl_buffers.bound_elem_array_b = id;
             else
                 gldl_buffers.bound_array_b = id;
+            break;
         }
     }
 }
@@ -1106,7 +1363,7 @@ static void DeleteProgram( GLuint id ) {
 
             // unbind this program if bound
             if( gldl_programs.bound_program == id )
-                gldl_programs.bound_program = -1;
+                gldl_programs.bound_program = 0;
 
             gldl_programs.count--;
 
@@ -1187,6 +1444,11 @@ static void DetachShader( GLuint prog_id, GLuint shader_id ) {
 
 static void BindProgram( GLuint id ) {
     int i;
+
+    if( !id ) {
+        gldl_programs.bound_program = 0;
+        return;
+    }
 
     for( i = 0; i < gldl_programs.size; ++i ) {
         if( gldl_programs.arr[i].id == -1 )
@@ -1279,6 +1541,33 @@ static void PrintShader( int index ) {
 */
 }
 
+// Initialize the gldl_states struct with all default states
+static void InitGLStates() {
+    GLboolean b;
+
+    // blending
+    b = glIsEnabled( GL_BLEND );
+    gldl_states.blend = b;
+
+    glGetIntegerv( GL_BLEND_SRC, &gldl_states.blendfunc_src );
+    glGetIntegerv( GL_BLEND_DST, &gldl_states.blendfunc_dest );
+
+    // face culling
+    b = glIsEnabled( GL_CULL_FACE );
+    gldl_states.face_culling = b;
+
+    glGetIntegerv( GL_CULL_FACE_MODE, &gldl_states.culled_face );
+
+    // depth
+    b = glIsEnabled( GL_DEPTH_TEST );
+    gldl_states.depth_test = b;
+
+    // texture filters and wrapping
+    glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &gldl_states.mag_filter );
+    glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &gldl_states.min_filter );
+    glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &gldl_states.wrap_s );
+    glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &gldl_states.wrap_t );
+}
 
 // Store the used GL version in the gl_version struct
 // Returns 1 if Core Profile loaded correctly
@@ -1317,8 +1606,8 @@ static void DebugTest( int func_index ) {
 // Interactive Debug session when a breakpoint arose or during initialization
 static void DebugFunction() {
     char line[128];
-    static char last_cmd[32] = "", last_params[32][3] = { "", "", "" };//last_param[32] = "", last_param2[32] = "";
-    char cmd[32] = "", params[32][3] = { "", "", "" }; // = "", param2[32] = "";
+    static char last_cmd[32] = "", last_params[3][32] = { "", "", "" };
+    char cmd[32] = "", params[3][32] = { "", "", "" }; 
     int scan_ret;
     int nomatch = 0;
     int i;
@@ -1514,16 +1803,198 @@ static void DebugFunction() {
             PrintShader( id );
         }
 
-        // open glfw
+        // open texture visualisation window
         else if( !strcmp( cmd, "pt" ) || !strcmp( cmd, "printtexture" ) ) {
             // check for param
-            if( scan_ret != 2 ) {
-                printf( "Printtexture usage : [p]rint[t]exture texture_id.\\n" );
+            if( scan_ret < 2 ) {
+                printf( "Printtexture usage : [p]rint[t]exture texture_id [reverse].\\n" );
                 continue;
             }
 
             int id = atoi( params[0] );
-            ShowTexture( id );
+            int reverse = 1;
+
+            if( scan_ret == 3 ) 
+                reverse = atoi( params[1] );
+
+            ShowTexture( id, reverse );
+        }
+
+        // print OpenGL states
+        else if( !strcmp( cmd, "pst" ) || !strcmp( cmd, "printstate" ) ) {
+            // check for param (at least one)
+            if( scan_ret < 2 ) {
+                printf( "Printstate usage : [p]rint[st]ate state [param].\\n" );
+                continue;
+            }
+
+            // switch on state
+            if( !strcmp( params[0], "ACTIVE_TEXTURE_UNIT" ) ) {
+                printf( "Current texture unit : GL_TEXTURE%d.\\n", gldl_textures.current_unit );
+                continue;
+            }
+            else if( !strcmp( params[0], "BOUND_TEXTURE" ) ) {
+                if( scan_ret < 3 ) {
+                    printf( "Usage : [p]rint[st]ate BOUND_TEXTURE texture_unit(int).\\n" ); 
+                } else {
+                    int unit = atoi( params[1] );
+                    if( ( !unit && strcmp( params[1], "0" ) ) || unit >= 8 ) 
+                        printf( "Invalid texture unit (must be integer < 8).\\n" );
+                    else
+                        printf( "Texture bound on unit %d : %d.\\n", unit, gldl_textures.bound_textures[unit] );
+                }
+                continue;
+            }
+            else if( !strcmp( params[0], "BOUND_BUFFER" ) ) {
+                if( scan_ret < 3 ) {
+                    printf( "Usage : [p]rint[st]ate BOUND_BUFFER type(ARRAY_BUFFER or ELEMENT_ARRAY_BUFFER).\\n" );
+                } else {
+                    if( !strcmp( params[1], "ARRAY_BUFFER" ) )
+                        printf( "Buffer bound on GL_ARRAY_BUFFER : %d.\\n", gldl_buffers.bound_array_b );
+                    else if( !strcmp( params[1], "ELEMENT_ARRAY_BUFFER" ) )
+                        printf( "Buffer bound on GL_ELEMENT_ARRAY_BUFFER : %d.\\n", gldl_buffers.bound_elem_array_b );
+                    else
+                        printf( "Invalid buffer array type.\\n" );
+                }
+                continue;
+            }
+            else if( !strcmp( params[0], "BOUND_PROGRAM" ) ) {
+                printf( "Currently used shader program : %d.\\n", gldl_programs.bound_program );
+                continue;
+            }
+            else if( !strcmp( params[0], "DEPTH_TEST" ) ) {
+                printf( "GL_DEPTH_TEST is %s.\\n", gldl_states.depth_test ? "on" : "off" );
+                continue; 
+            }
+            else if( !strcmp( params[0], "BLEND" ) ) {
+                printf( "GL_BLEND is %s.\\n", gldl_states.blend ? "on" : "off" );
+                continue; 
+            }
+            else if( !strcmp( params[0], "FACE_CULLING" ) ) {
+                printf( "GL_CULL_FACE is %s.\\n", gldl_states.face_culling ? "on" : "off" );
+                continue; 
+            }
+            else if( !strcmp( params[0], "CULLED_FACE" ) ) {
+                char face[32];
+
+                if( gldl_states.culled_face == GL_FRONT ) strcpy( face, "GL_FRONT" );
+                if( gldl_states.culled_face == GL_BACK ) strcpy( face, "GL_BACK" );
+                if( gldl_states.culled_face == GL_FRONT_AND_BACK ) strcpy( face, "GL_FRONT_AND_BACK" );
+
+                printf( "The culled face is %s.\\n", face );
+                continue; 
+            }
+            else if( !strcmp( params[0], "BLEND_FUNC" ) ) {
+                char dfactor[32], sfactor[32];
+                char *dst_str = sfactor;
+                int  ifactor = gldl_states.blendfunc_src;
+                int  i;
+
+                for( i = 0; i < 2; ++i ) {
+                    switch( ifactor ) {
+                    case GL_ONE : strcpy( dst_str, "GL_ONE" ); break;
+                    case GL_ZERO : strcpy( dst_str, "GL_ZERO" ); break;
+                    case GL_SRC_COLOR : strcpy( dst_str, "GL_SRC_COLOR" ); break;
+                    case GL_DST_COLOR : strcpy( dst_str, "GL_DST_COLOR" ); break;
+                    case GL_SRC_ALPHA : strcpy( dst_str, "GL_SRC_ALPHA" ); break;
+                    case GL_DST_ALPHA : strcpy( dst_str, "GL_DST_ALPHA" ); break;
+                    case GL_CONSTANT_COLOR : strcpy( dst_str, "GL_CONSTANT_COLOR" ); break;
+                    case GL_CONSTANT_ALPHA : strcpy( dst_str, "GL_CONSTANT_ALPHA" ); break;
+                    case GL_SRC_ALPHA_SATURATE : strcpy( dst_str, "GL_SRC_ALPHA_SATURATE" ); break;
+                    case GL_SRC1_COLOR : strcpy( dst_str, "GL_SRC1_COLOR" ); break;
+                    #ifdef GL_SRC1_ALPHA
+                    case GL_SRC1_ALPHA : strcpy( dst_str, "GL_SRC1_ALPHA" ); break;
+                    #endif
+
+                    case GL_ONE_MINUS_SRC_COLOR : strcpy( dst_str, "GL_ONE_MINUS_SRC_COLOR" ); break;
+                    case GL_ONE_MINUS_DST_COLOR : strcpy( dst_str, "GL_ONE_MINUS_DST_COLOR" ); break;
+                    case GL_ONE_MINUS_SRC_ALPHA : strcpy( dst_str, "GL_ONE_MINUS_SRC_ALPHA" ); break;
+                    case GL_ONE_MINUS_DST_ALPHA : strcpy( dst_str, "GL_ONE_MINUS_DST_ALPHA" ); break;
+                    case GL_ONE_MINUS_CONSTANT_COLOR : strcpy( dst_str, "GL_ONE_MINUS_CONSTANT_COLOR" ); break;
+                    case GL_ONE_MINUS_CONSTANT_ALPHA : strcpy( dst_str, "GL_ONE_MINUS_CONSTANT_ALPHA" ); break;
+                    case GL_ONE_MINUS_SRC1_COLOR : strcpy( dst_str, "GL_ONE_MINUS_SRC1_COLOR" ); break;
+                    case GL_ONE_MINUS_SRC1_ALPHA : strcpy( dst_str, "GL_ONE_MINUS_SRC1_ALPHA" ); break;
+                    default : strcpy( dst_str, "Invalid factor" ); break;
+                    }
+                    dst_str = dfactor;
+                    ifactor = gldl_states.blendfunc_dest;
+                }
+
+                printf( "Source factor is %s. Destination factor is %s.\\n", sfactor, dfactor );
+                continue;
+            }
+            else if( !strcmp( params[0], "TEXTURE_FILTER" ) ) {
+                if( scan_ret < 3 ) {
+                    printf( "Usage : [p]rint[st]ate TEXTURE_FILTER filter(MAG or MIN).\\n" );
+                } else {
+                    int type;
+                    char filter[32];
+                    if( !strcmp( params[1], "MIN" ) )
+                        type = gldl_states.min_filter;
+                    else if( !strcmp( params[1], "MAG" ) ) 
+                        type = gldl_states.mag_filter;
+                    else {
+                        printf( "Invalid texture filter type.\\n" );
+                        continue;
+                    }
+
+                    if( type == GL_NEAREST ) strcpy( filter, "GL_NEAREST" );
+                    if( type == GL_LINEAR ) strcpy( filter, "GL_LINEAR" );
+                    if( type == GL_NEAREST_MIPMAP_NEAREST ) strcpy( filter, "GL_NEAREST_MIPMAP_NEAREST" );
+                    if( type == GL_LINEAR_MIPMAP_NEAREST ) strcpy( filter, "GL_LINEAR_MIPMAP_NEAREST" );
+                    if( type == GL_NEAREST_MIPMAP_LINEAR ) strcpy( filter, "GL_NEAREST_MIPMAP_LINEAR" );
+                    if( type == GL_LINEAR_MIPMAP_LINEAR ) strcpy( filter, "GL_LINEAR_MIPMAP_LINEAR" );
+
+                    printf( "%s texture filter : %s.\\n", type == gldl_states.min_filter ? "Min" : "Mag", filter );
+                }
+                continue; 
+            }
+            else if( !strcmp( params[0], "TEXTURE_WRAP" ) ) {
+                if( scan_ret < 3 ) {
+                    printf( "Usage : [p]rint[st]ate TEXTURE_WRAP wrap(S or T).\\n" );
+                } else {
+                    int type;
+                    char wrap[32];
+                    if( !strcmp( params[1], "S" ) )
+                        type = gldl_states.wrap_s;
+                    else if( !strcmp( params[1], "T" ) ) 
+                        type = gldl_states.wrap_t;
+                    else {
+                        printf( "Invalid texture filter type.\\n" );
+                        continue;
+                    }
+                    
+                    if( type == GL_CLAMP_TO_EDGE ) strcpy( wrap, "GL_CLAMP_TO_EDGE" );
+                    if( type == GL_CLAMP_TO_BORDER ) strcpy( wrap, "GL_CLAMP_TO_BORDER" );
+                    if( type == GL_MIRRORED_REPEAT ) strcpy( wrap, "GL_MIRRORED_REPEAT" );
+                    if( type == GL_REPEAT ) strcpy( wrap, "GL_REPEAT" );
+
+                    printf( "Texture wrap_%s : %s.\\n", type == gldl_states.wrap_s ? "s" : "t", wrap );
+                }
+                continue;
+            }
+            else
+                printf( "Invalid state name.\\n" );
+        }
+
+        // quit program (violently)
+        else if( !strcmp( cmd, "q" ) || !strcmp( cmd, "quit" ) ) {
+            // get confirmation
+            char str[4];
+            char c;
+
+            printf( "GLDL Debugging session active.\\n" );
+
+            while( 1 ) {
+                printf( "Quit anyway ? (y or n) " );
+                gets( str );
+                sscanf( str, "%c", &c );
+
+                if( 'n' == c )
+                    break;
+                if( 'y' == c ) 
+                    exit( 1 );
+            }
         }
 
         // no match, show help
@@ -1616,10 +2087,6 @@ for i in range( len(names) ) :
         else :
             types.append( "" )
         
-    print types
-    print formats
-    print values
-
     
 
     # Write signature
@@ -1649,8 +2116,6 @@ for i in range( len(names) ) :
     if( parameters_n[i] == 0 ) :
         gldl_c.write( ");\\n\", file, line );\n" )
     else :
-        # get format to print params
-
         # print formats
         for j in range( parameters_n[i] - 1 ) :
             gldl_c.write( " %" + formats[j] + "," )
@@ -1726,6 +2191,43 @@ for i in range( len(names) ) :
         gldl_c.write( "\tDetachShader( program, shader );\n" );
     elif names[i] == "glUseProgram" :
         gldl_c.write( "\tBindProgram( program );\n" );
+
+    # Handle Textures functions
+    elif names[i] == "glGenTextures" :
+        gldl_c.write( "\tAddTextures( n, textures );\n" );
+    elif names[i] == "glDeleteTextures" :
+        gldl_c.write( "\tDeleteTextures( n, textures );\n" );
+    elif names[i] == "glTexImage2D" :
+        gldl_c.write( "\tSetTextureSize( gldl_textures.bound_textures[gldl_textures.current_unit], width, height );\n" );
+    elif names[i] == "glBindTexture" :
+        gldl_c.write( "\tBindTexture( texture );\n" );
+    elif names[i] == "glActiveTexture" :
+        gldl_c.write( "\tSetTextureUnit( texture );\n" );
+
+    # Handle GL states
+    elif names[i] == "glEnable" :
+        gldl_c.write( r'''
+    if( cap == GL_DEPTH_TEST ) gldl_states.depth_test = 1;
+    if( cap == GL_CULL_FACE ) gldl_states.face_culling = 1;
+    if( cap == GL_BLEND ) gldl_states.blend = 1;
+    ''' )
+    elif names[i] == "glDisable" :
+        gldl_c.write( r'''
+    if( cap == GL_DEPTH_TEST ) gldl_states.depth_test = 0;
+    if( cap == GL_CULL_FACE ) gldl_states.face_culling = 0;
+    if( cap == GL_BLEND ) gldl_states.blend = 0;
+    ''' )
+    elif names[i] == "glCullFace" :
+        gldl_c.write( "\tgldl_states.culled_face = mode;\n" )
+    elif names[i] == "glBlendFunc" :
+        gldl_c.write( "\tgldl_states.blendfunc_src = sfactor;\n\tgldl_states.blendfunc_dest = dfactor;\n" )
+    elif names[i] == "glTexParameteri" :
+        gldl_c.write( r'''
+    if( pname == GL_TEXTURE_MAG_FILTER ) gldl_states.mag_filter = param;
+    if( pname == GL_TEXTURE_MIN_FILTER ) gldl_states.min_filter = param;
+    if( pname == GL_TEXTURE_WRAP_S ) gldl_states.wrap_s = param;
+    if( pname == GL_TEXTURE_WRAP_T ) gldl_states.wrap_t = param;
+    ''' )
 
 
 

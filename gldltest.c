@@ -158,6 +158,16 @@ int main() {
         }\n";
 
 
+        glEnable( GL_DEPTH_TEST );
+        glEnable( GL_BLEND );
+        glEnable( GL_CULL_FACE );
+
+        glBlendFunc( GL_ONE_MINUS_SRC_ALPHA, GL_SRC1_COLOR );
+        glCullFace( GL_FRONT_AND_BACK );
+        glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+        glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+        glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+        glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER );
 
         int p = glCreateProgram();
 
