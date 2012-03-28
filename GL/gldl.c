@@ -1146,15 +1146,13 @@ char *gl_functions[GLDL_FUNC_N] = {
 #if defined(_WIN32) || defined(WIN32)
 #   define WIN32_LEAN_AND_MEAN
 #   include <windows.h>
+#   error This will not compile on Windows. Sorry :[ !
 
-#warning GLDL_WIN32
 // UNIX
 #else
 #include <dlfcn.h>
 #include <GL/glx.h>
 #include <signal.h>
-
-#warning GLDL_UNIX
     // OpenGL shared library handle
     static void *libgl;
 
@@ -1190,7 +1188,6 @@ char *gl_functions[GLDL_FUNC_N] = {
     static GLXContext   cl_ctx;
 
     int InitTextureWindow( int width, int height ) {
-        int                     success = 0;
         Window                  root;
         GLint                   attr[] = { GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None };
         XVisualInfo             *vi;
@@ -1249,14 +1246,8 @@ char *gl_functions[GLDL_FUNC_N] = {
         // Open created window
         XMapWindow( gldl_dpy, gldl_win );
 
-        success = glXMakeCurrent( gldl_dpy, gldl_win, cl_ctx );
-
-        if( success )
-            printf( "GL context attached to GLDL window.\n" );
-        else 
-            printf( "Failed to attach GL context to GLDL window.\n" );
-
-        return success;
+        
+        return glXMakeCurrent( gldl_dpy, gldl_win, cl_ctx );
     }
 
     int TextureWindowEvents() {
@@ -1298,11 +1289,7 @@ char *gl_functions[GLDL_FUNC_N] = {
     }
 
     void DestroyTextureWindow() {
-        int success = glXMakeCurrent( cl_dpy, cl_win, cl_ctx );
-        if( success )
-            printf( "GL context back to client window.\n" );
-        else 
-            printf( "Failed to move GL context back to client window.\n" );
+        glXMakeCurrent( cl_dpy, cl_win, cl_ctx );
 
         XUnmapWindow( gldl_dpy, gldl_win );
         XDestroyWindow( gldl_dpy, gldl_win );
@@ -1467,6 +1454,7 @@ static void SetTextureSize( GLuint id, GLuint width, GLuint height );
 static void BindTexture( GLuint id );
 static void SetTextureUnit( GLuint unit );
 static void ShowTexture( GLuint id, int reverse );
+static void ListTextures();
 
 
 static void InitGLStates();
@@ -1697,6 +1685,26 @@ static void SetTextureUnit( GLuint unit ) {
         gldl_textures.current_unit = real_unit;
 }
 
+static void ListTextures() {
+    int tex_cpt = 0;
+    int i;
+
+    for( i = 0; i < gldl_textures.size; ++i ) {
+        if( gldl_textures.arr[i].id == -1 )
+            break;
+
+        if( gldl_textures.arr[i].id ) {
+            if( !tex_cpt )
+                printf( "List of existing textures :\n" );
+            printf( "%d\n", gldl_textures.arr[i].id );
+            tex_cpt++;
+        }
+    }
+
+    if( !tex_cpt )
+        printf( "No GL textures.\n" );
+
+}
 
 void ShowTexture( GLuint id, int reverse ) {
     int tex_index = -1;
@@ -2632,6 +2640,10 @@ static void DebugFunction() {
         else if( !strcmp( cmd, "lp" ) || !strcmp( cmd, "listprograms" ) ) 
             ListPrograms();
 
+        // check for textures listing
+        else if( !strcmp( cmd, "lt" ) || !strcmp( cmd, "listtextures" ) ) 
+            ListTextures();
+
         // check for break demand on GL function
         else if( !strcmp( cmd, "b" ) || !strcmp( cmd, "break" ) ) {
             // retrieve function name index
@@ -2707,7 +2719,7 @@ static void DebugFunction() {
                 }
                 continue;
             } else {
-                printf( "Delete usage : [d]elete [breakpoint_id].\n" );
+                printf( "Delete usage : [d]elete [breakpoint_id].\nIf no breakpoint_id specified, will ask to delete all breakpoints.\n" );
             }
         }
 
@@ -2715,7 +2727,11 @@ static void DebugFunction() {
         else if( !strcmp( cmd, "pb" ) || !strcmp( cmd, "printbuffer" ) ) {
             // check for param
             if( scan_ret < 2 ) {
-                printf( "Printbuffer usage : [p]rint[b]uffer buffer_id [type_size [elem_size]].\n" );
+                printf( "Printbuffer usage : [p]rint[b]uffer buffer_id [type_size [elem_size]].\n"\
+                        "  type_size is the number of component of the type of data (default = 1).\n"\
+                        "    Ex : for a vec3, specify 3 as the type_size\n"\
+                        "  elem_size is the size of one value of the buffer, in bytes (default = 4).\n"\
+                        "    Ex : for shorts, precise 2, for bytes, precise 1, etc..\n" );
                 continue;
             }
 
@@ -2761,7 +2777,8 @@ static void DebugFunction() {
         else if( !strcmp( cmd, "pt" ) || !strcmp( cmd, "printtexture" ) ) {
             // check for param
             if( scan_ret < 2 ) {
-                printf( "Printtexture usage : [p]rint[t]exture texture_id [reverse].\n" );
+                printf( "Printtexture usage : [p]rint[t]exture texture_id [reverse].\n"\
+                        "  reverse will reverse the texture on the Y axis.\n" );
                 continue;
             }
 
@@ -2778,7 +2795,20 @@ static void DebugFunction() {
         else if( !strcmp( cmd, "pst" ) || !strcmp( cmd, "printstate" ) ) {
             // check for param (at least one)
             if( scan_ret < 2 ) {
-                printf( "Printstate usage : [p]rint[st]ate state [param].\n" );
+                printf( "Printstate usage : [p]rint[st]ate state [param].\n"\
+                        "List of states :\n"\
+                        "  ACTIVE_TEXTURE_UNIT   : the currently active texture unit.\n"\
+                        "  BOUND_TEXTURE [unit]  : the currently bound texture on the given unit.\n"\
+                        "  BOUND_BUFFER [target] : the currently bound buffer on the given target (ARRAY_BUFFER or ELEMENT_ARRAY_BUFFER).\n"\
+                        "  BOUND_PROGRAM         : the currently bound shader program.\n"\
+                        "  DEPTH_TEST            : whether GL_DEPTH_TEST is on or not.\n"\
+                        "  BLEND                 : whether GL_BLEND is on or not.\n"\
+                        "  FACE_CULLING          : whether GL_CULL_FACE is on or not.\n"\
+                        "  CULLED_FACE           : the currently culled face.\n"\
+                        "  BLEND_FUNC            : the source and dest factors of the blending function.\n"\
+                        "  TEXTURE_FILTER [type] : the texture filter for type (MIN or MAG).\n"\
+                        "  TEXTURE_WRAP [type]   : the texture wrap for type (S or T).\n"
+                      );
                 continue;
             }
 
@@ -2801,7 +2831,7 @@ static void DebugFunction() {
             }
             else if( !strcmp( params[0], "BOUND_BUFFER" ) ) {
                 if( scan_ret < 3 ) {
-                    printf( "Usage : [p]rint[st]ate BOUND_BUFFER type(ARRAY_BUFFER or ELEMENT_ARRAY_BUFFER).\n" );
+                    printf( "Usage : [p]rint[st]ate BOUND_BUFFER target(ARRAY_BUFFER or ELEMENT_ARRAY_BUFFER).\n" );
                 } else {
                     if( !strcmp( params[1], "ARRAY_BUFFER" ) )
                         printf( "Buffer bound on GL_ARRAY_BUFFER : %d.\n", gldl_buffers.bound_array_b );
@@ -2929,6 +2959,29 @@ static void DebugFunction() {
             }
             else
                 printf( "Invalid state name.\n" );
+        }
+
+        // print help
+        else if( !strcmp( cmd, "h" ) || !strcmp( cmd, "help" ) ) {
+            printf( "GLDL commands :\n\n" \
+                    "  [c]ontinue         - Continue the execution, until the next breakpoint.\n" \
+                    "  [n]ext             - Continue the execution, until the next GL function.\n" \
+                    "  [b]reak            - Sets a breakpoint on a GL function.\n" \
+                    "  [d]elete           - Delete a breakpoint.\n" \
+                    "  [q]uit             - Quit the program.\n" \
+                    "  [l]ist             - List all breakpoints.\n" \
+                    "  [l]ist[b]uffers    - List all GL buffers.\n" \
+                    "  [l]ist[s]haders    - List all GL shaders.\n" \
+                    "  [l]ist[p]rograms   - List all GL programs.\n" \
+                    "  [l]ist[t]extures   - List all GL textures.\n" \
+                    "  [p]rint[b]uffer    - Print the given GL buffer.\n" \
+                    "  [p]rint[s]hader    - Print the given GL shader source.\n" \
+                    "  [p]rint[p]rogram   - Print the given GL shader program.\n" \
+                    "  [p]rint[t]exture   - Display the given GL texture.\n" \
+                    "  [p]rint[st]ate     - Print the given GL state.\n\n" \
+                    "Using the commands without arguments will in some cases give additional informations on the usage.\n\n"
+                  );
+            continue;
         }
 
         // quit program (violently)

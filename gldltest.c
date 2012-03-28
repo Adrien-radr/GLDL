@@ -83,6 +83,42 @@ void CheckGLError_func( const char *pFile, int pLine ) {
 
 
 int main() {
+
+    if( !glfwInit() ) {
+        printf("GLFW Init error!\n");
+        return -1;
+    }
+
+    glfwOpenWindow( 800, 600,
+                    8, 8, 8, 8,
+                    24, 8, GLFW_WINDOW);
+
+
+    if( !gldlInit() ) {
+        printf( "Error initializing gldl!\n" );
+        return 1;
+    }
+
+    if( !gldlIsSupported( 3, 3 ) ) {
+        printf( "GL 3.3 not supported.\n" );
+        return 1;
+    }
+
+
+    printf( "OpenGL v%s.\n", glGetString( GL_VERSION ) );
+    printf( "GLSL v%s\n", glGetString( GL_SHADING_LANGUAGE_VERSION ) );
+
+    while( glfwGetWindowParam( GLFW_OPENED ) ) {
+        glClear( GL_COLOR_BUFFER_BIT );
+
+
+        glfwSwapBuffers();
+    }
+
+    return 0;
+}
+/*
+int main() {
     int noerr;
 	noerr = glfwInit();
 
@@ -200,3 +236,4 @@ int main() {
 
 	return 0;
 }
+*/

@@ -1,5 +1,5 @@
 CC = gcc
-LFLAGS = -Wall -lglfw -g
+LFLAGS = -Wall -O2
 CFLAGS = -Wall -lglfw -lGL -lX11 -lXrandr -lpthread -ldl -g
 
 .PHONY: gldl,all,exec,clean
