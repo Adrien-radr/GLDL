@@ -1513,9 +1513,9 @@ int gldlInit() {
 
 int gldlIsSupported( unsigned int major, unsigned int minor ) {
     if( major < 3 ) return 0;
-    if( major > gl_version.major ) return 1;
+    if( major < gl_version.major ) return 1;
 
-    return ( major == gl_version.major && minor >= gl_version.minor );
+    return ( major <= gl_version.major && minor <= gl_version.minor );
 }
 
 void gldlBeginTrace( unsigned int trace_n ) {
