@@ -48,6 +48,10 @@ API
 
 >    Check if the given ``major.minor`` OpenGL version is available. Returns ``1`` if it is, or ``0`` otherwise.
     
+``void gldlBreak()``
+
+>   This will cause a break into interactive debug session, wherever you put it.
+
 ``void gldlBeginTrace( int traceNumber )``
 
 >    Activate logging of every GL function call after that. This will be stored in a file called ``traceX.log``, with 
@@ -90,13 +94,21 @@ Example Code
         }
         
         
+        gldlBeginTrace( 0 );
+        
         printf( "OpenGL v%s.\n", glGetString( GL_VERSION ) );
         printf( "GLSL v%s\n", glGetString( GL_SHADING_LANGUAGE_VERSION ) );
+        
+        glClearColor( 1.f, 1.f, 1.f, 1.f );
+        
+        gldlEndTrace( 0 );
         
         while( glfwGetWindowParam( GLFW_OPENED ) ) {
             glClear( GL_COLOR_BUFFER_BIT );
             
-            ..
+            gldlBreak();
+            
+            // ...
             
             glfwSwapBuffers();
         }
