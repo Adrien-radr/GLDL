@@ -921,7 +921,6 @@ void ShowTexture( GLuint id, int reverse ) {
     gldlBufferData_impl( GL_ARRAY_BUFFER, sizeof(mesh), mesh, GL_STATIC_DRAW );
 
     gldlEnableVertexAttribArray_impl( pos_attrib );
-    //gldlDisableVertexAttribArray_impl( 1 );
     gldlVertexAttribPointer_impl( pos_attrib, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), 0 );
 
     
@@ -963,7 +962,6 @@ void ShowTexture( GLuint id, int reverse ) {
 
     // get back to previously bound objects
     gldlUseProgram_impl( gldl_programs.bound_program );
-    //gldlBindBuffer_impl( GL_ARRAY_BUFFER, gldl_buffers.bound_array_b );
     gldlBindVertexArray_impl( gldl_states.bound_vao );
 
     // go back to previously bound texture for unit 0
