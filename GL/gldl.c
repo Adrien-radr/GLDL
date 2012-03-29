@@ -1401,7 +1401,8 @@ static struct {
             blendfunc_src,
             blendfunc_dest,
             face_culling,
-            culled_face;
+            culled_face,
+            bound_vao;
 
     int     mag_filter,
             min_filter,
@@ -1525,6 +1526,10 @@ void gldlEndTrace( unsigned int trace_n ) {
     gldl_traces[trace_n].started = 0;
 }
 
+void gldlBreak_impl( const char *file, int line ) {
+    printf( "Breapoint on gldlBreak() at %s:%d\n", file, line );
+    DebugFunction();
+}
 
 
 
@@ -1856,13 +1861,18 @@ void ShowTexture( GLuint id, int reverse ) {
          1.f,  1.f
     };
 
+    // new VAO
+    GLuint vao;
+    gldlGenVertexArrays_impl( 1, &vao );
+    gldlBindVertexArray_impl( vao );
+
     GLuint vbo;
     gldlGenBuffers_impl( 1, &vbo );
     gldlBindBuffer_impl( GL_ARRAY_BUFFER, vbo );
     gldlBufferData_impl( GL_ARRAY_BUFFER, sizeof(mesh), mesh, GL_STATIC_DRAW );
 
     gldlEnableVertexAttribArray_impl( pos_attrib );
-    gldlDisableVertexAttribArray_impl( 1 );
+    //gldlDisableVertexAttribArray_impl( 1 );
     gldlVertexAttribPointer_impl( pos_attrib, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), 0 );
 
     
@@ -1904,7 +1914,8 @@ void ShowTexture( GLuint id, int reverse ) {
 
     // get back to previously bound objects
     gldlUseProgram_impl( gldl_programs.bound_program );
-    gldlBindBuffer_impl( GL_ARRAY_BUFFER, gldl_buffers.bound_array_b );
+    //gldlBindBuffer_impl( GL_ARRAY_BUFFER, gldl_buffers.bound_array_b );
+    gldlBindVertexArray_impl( gldl_states.bound_vao );
 
     // go back to previously bound texture for unit 0
     gldlBindTexture_impl( GL_TEXTURE_2D, gldl_textures.bound_textures[0] );
@@ -1913,6 +1924,7 @@ void ShowTexture( GLuint id, int reverse ) {
     gldlActiveTexture_impl( GL_TEXTURE0 + gldl_textures.current_unit );
 
     gldlDeleteBuffers_impl( 1, &vbo );
+    gldlDeleteVertexArrays_impl( 1, &vao );
     gldlDeleteProgram_impl( prog );
         
 error:
@@ -2529,6 +2541,9 @@ static void InitGLStates() {
     glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &gldl_states.min_filter );
     glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &gldl_states.wrap_s );
     glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &gldl_states.wrap_t );
+
+    // vao (none at first
+    gldl_states.bound_vao = 0;
 }
 
 // Store the used GL version in the gl_version struct
@@ -2800,6 +2815,7 @@ static void DebugFunction() {
                         "  ACTIVE_TEXTURE_UNIT   : the currently active texture unit.\n"\
                         "  BOUND_TEXTURE [unit]  : the currently bound texture on the given unit.\n"\
                         "  BOUND_BUFFER [target] : the currently bound buffer on the given target (ARRAY_BUFFER or ELEMENT_ARRAY_BUFFER).\n"\
+                        "  BOUND_VERTEXARRAY     : the currently bound vertex array object.\n"\
                         "  BOUND_PROGRAM         : the currently bound shader program.\n"\
                         "  DEPTH_TEST            : whether GL_DEPTH_TEST is on or not.\n"\
                         "  BLEND                 : whether GL_BLEND is on or not.\n"\
@@ -2842,6 +2858,10 @@ static void DebugFunction() {
                 }
                 continue;
             }
+            else if( !strcmp( params[0], "BOUND_VERTEXARRAY" ) ) {
+                printf( "Currently used vertex array : %d.\n", gldl_states.bound_vao );
+                continue;
+            }   
             else if( !strcmp( params[0], "BOUND_PROGRAM" ) ) {
                 printf( "Currently used shader program : %d.\n", gldl_programs.bound_program );
                 continue;
@@ -7500,6 +7520,7 @@ void gldlBindVertexArray ( GLuint array, const char *arg0, const char *file, int
         DebugFunction();
     }
     gldlBindVertexArray_impl( array );
+	gldl_states.bound_vao = array;
 }
 void gldlDeleteVertexArrays ( GLsizei n, const GLuint *arrays, const char *arg0, const char *arg1, const char *file, int line ) {
     int i;

@@ -21,6 +21,9 @@ int gldlIsSupported( unsigned int major, unsigned int minor );
 void gldlBeginTrace( unsigned int trace_n );
 void gldlEndTrace( unsigned int trace_n );
 
+void gldlBreak_impl( const char *file, int line ); 
+#define gldlBreak() gldlBreak_impl( __FILE__, __LINE__ )
+
 
 // Debug version of GL functions
 // Parameters :
