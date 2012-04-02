@@ -94,14 +94,14 @@ Example Code
         }
         
         
-        gldlBeginTrace( 0 );
+        gldlBeginTrace( 1 );
         
         printf( "OpenGL v%s.\n", glGetString( GL_VERSION ) );
         printf( "GLSL v%s\n", glGetString( GL_SHADING_LANGUAGE_VERSION ) );
         
         glClearColor( 1.f, 1.f, 1.f, 1.f );
         
-        gldlEndTrace( 0 );
+        gldlEndTrace( 1 );
         
         while( glfwGetWindowParam( GLFW_OPENED ) ) {
             glClear( GL_COLOR_BUFFER_BIT );

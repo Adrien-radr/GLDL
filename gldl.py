@@ -356,6 +356,7 @@ static int  gldl_init = 0;                  // Assure that gldl has been init
 static int  break_functions[GLDL_FUNC_N];   // Breakpoints storing array
 static int  break_next = 0;                 // Break on next function ?
 static char debug_break[10];                // Used to display break cause (breakpoint nb or a 'n' break)
+static int  gldlBreak_active = 1;           // Is the gldlBreak() function active?
 
 // GL function call traces
 // First trace is the init trace (trace until first glClear())
@@ -576,8 +577,10 @@ void gldlEndTrace( unsigned int trace_n ) {
 }
 
 void gldlBreak_impl( const char *file, int line ) {
-    printf( "Breapoint on gldlBreak() at %s:%d\n", file, line );
-    DebugFunction();
+    if( gldlBreak_active ) {
+        printf( "Breapoint on gldlBreak() at %s:%d\nEnter the 'tb' command to toggle the gldlBreak function.\n", file, line );
+        DebugFunction();
+    }
 }
 
 
@@ -1567,27 +1570,27 @@ static void InitGLStates() {
     GLboolean b;
 
     // blending
-    b = glIsEnabled( GL_BLEND );
+    b = gldlIsEnabled_impl( GL_BLEND );
     gldl_states.blend = b;
 
-    glGetIntegerv( GL_BLEND_SRC, &gldl_states.blendfunc_src );
-    glGetIntegerv( GL_BLEND_DST, &gldl_states.blendfunc_dest );
+    gldlGetIntegerv_impl( GL_BLEND_SRC, &gldl_states.blendfunc_src );
+    gldlGetIntegerv_impl( GL_BLEND_DST, &gldl_states.blendfunc_dest );
 
     // face culling
-    b = glIsEnabled( GL_CULL_FACE );
+    b = gldlIsEnabled_impl( GL_CULL_FACE );
     gldl_states.face_culling = b;
 
-    glGetIntegerv( GL_CULL_FACE_MODE, &gldl_states.culled_face );
+    gldlGetIntegerv_impl( GL_CULL_FACE_MODE, &gldl_states.culled_face );
 
     // depth
-    b = glIsEnabled( GL_DEPTH_TEST );
+    b = gldlIsEnabled_impl( GL_DEPTH_TEST );
     gldl_states.depth_test = b;
 
     // texture filters and wrapping
-    glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &gldl_states.mag_filter );
-    glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &gldl_states.min_filter );
-    glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &gldl_states.wrap_s );
-    glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &gldl_states.wrap_t );
+    gldlGetTexParameteriv_impl( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &gldl_states.mag_filter );
+    gldlGetTexParameteriv_impl( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &gldl_states.min_filter );
+    gldlGetTexParameteriv_impl( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &gldl_states.wrap_s );
+    gldlGetTexParameteriv_impl( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &gldl_states.wrap_t );
 
     // vao (none at first
     gldl_states.bound_vao = 0;
@@ -2028,6 +2031,11 @@ static void DebugFunction() {
                 printf( "Invalid state name.\\n" );
         }
 
+        // toggle Break Function
+        else if( !strcmp( cmd, "tb" ) || !strcmp( cmd, "togglebreak" ) ) {
+            gldlBreak_active = 1 - gldlBreak_active;
+        }
+
         // print help
         else if( !strcmp( cmd, "h" ) || !strcmp( cmd, "help" ) ) {
             printf( "GLDL commands :\\n\\n" \\
@@ -2035,6 +2043,7 @@ static void DebugFunction() {
                     "  [n]ext             - Continue the execution, until the next GL function.\\n" \\
                     "  [b]reak            - Sets a breakpoint on a GL function.\\n" \\
                     "  [d]elete           - Delete a breakpoint.\\n" \\
+                    "  [t]oggle[b]reak    - Toggle the gldlBreak() function.\\n" \\
                     "  [q]uit             - Quit the program.\\n" \\
                     "  [l]ist             - List all breakpoints.\\n" \\
                     "  [l]ist[b]uffers    - List all GL buffers.\\n" \\
