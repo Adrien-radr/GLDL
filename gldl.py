@@ -38,6 +38,9 @@ max_name_len = 0
 
 procs_re = re.compile( r"^GLAPI.+APIENTRY gl.+(.*);$" )
 
+cstre = re.compile( r"^#define GL_[A-Z_]+ +[0-9A-Fx]+$" )
+csts = 0
+
 for line in gl3_src :
     match_line = procs_re.match( line )
     if( match_line ) :
@@ -60,10 +63,16 @@ for line in gl3_src :
         else :
             parameters.append( sig[1:-2] )
             parameters_n.append( len(sig[1:-2].split( "," ) ) )
+    elif( cstre.match( line) ) :
+        csts = csts + 1
 
 
 # Get alphabetically sorted name array (for faster search in C program)
 sorted_names = sorted( names )
+
+# constants :
+print "fonctions : " + str(len(names))
+print "constants : " + str(csts)
 
 
 
@@ -193,9 +202,154 @@ gldl_c.write( r'''};
 
 // WINDOWS
 #if defined(_WIN32) || defined(WIN32)
-#   define WIN32_LEAN_AND_MEAN
+#   define WIN32_LEAN_AND_MEAN 1
 #   include <windows.h>
-#   error This will not compile on Windows. Sorry :[ !
+    // OpenGL shared library handle
+    static HMODULE libgl;
+
+    /// Load dynamic library opengl32.dll and store its handle
+    static void OpenLib() {
+        libgl = LoadLibraryA( "opengl32.dll" );
+    }
+
+    /// Close the libgl handle
+    static void CloseLib() {
+        FreeLibrary( libgl );
+    }
+
+    /// Returns the GL Procedure corresponding to the given procedure name
+    static void *GetProc( const char *pProcName ) {
+        void *proc = NULL;
+
+        proc = wglGetProcAddress( pProcName );
+        if( !proc )
+            proc = GetProcAddress( libgl, pProcName );
+        return proc;
+    }
+
+    // Win32API Texture window stuff
+    static WNDCLASSEX gldl_wc;
+    static HWND       gldl_win;
+
+    // Client Window stuff
+    static HGLRC    cl_ctx;
+    static HDC      cl_win;
+
+    void SwapTextureWindow() {
+        SwapBuffers( GetDC( gldl_win ) );
+    }
+
+    LRESULT CALLBACK windowProc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam ) {
+        // get current hwnd
+        gldl_win = hwnd;
+
+        switch( msg ) {
+            case WM_CREATE :
+                // init GL
+                GLuint PixelFormat;
+
+                HDC hdc = GetDC( hwnd );
+                PIXELFORMATDESCRIPTOR pfd;
+                memset( &pfd, 0, sizeof(PIXELFORMATDESCRIPTOR) );
+
+                pfd.dwFlags |= PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER;
+                pfd.iPixelType = PFD_TYPE_RGBA;
+                pfd.iLayerType = PFD_MAIN_PLANE;
+                pfd.cColorBits = 32;
+
+                if( !( PixelFormat = ChoosePixelFormat( hdc, &pfd ) ) ) {
+                    printf( "Can't select pixel format\n" );
+                    return 0;
+                }
+
+                if( SetPixelFormat( hdc, PixelFormat, &pfd ) == FALSE ) {
+                    printf( "Can't set pixel format\n" );
+                    return 0;
+                }
+
+                wglMakeCurrent( hdc, cl_ctx );
+                    
+
+                ShowWindow( hwnd, SW_SHOWDEFAULT );
+                UpdateWindow( hwnd );
+                break;
+
+            case WM_SIZE :
+                glViewport( 0, 0, LOWORD(lParam), HIWORD(wParam) );
+                break;
+
+            case WM_PAINT :
+                SwapTextureWindow();
+                break;
+
+            default :
+                return DefWindowProc( hwnd, msg, wparam, lparam );
+        }
+
+        return 0;
+    }
+    
+
+    int InitTextureWindow( int width, int height ) {
+        
+        cl_ctx = wglGetCurrentContext();
+        cl_win = wglGetCurrentDC();
+
+        memset( &wc, 0, sizeof(wc) );
+
+        wc.lpszClassName = L"gl32wc";
+        wc.cbSize        = sizeof(WNDCLASSEX);
+        wc.style         ) CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+        wc.lpfnWndProc   = windowProc;
+        wc.hInstance     = HINST;
+        wc.hCursor       = LoadCursor( 0, IDC_ARROW );
+
+        if( !RegisterClassEx( &wc ) ) {
+            printf( "Can't register window class\n" );
+            return 0;
+        }
+            
+        if( !CreateWindowEx( 0, L"gl32wc",
+                                L"GLDL",
+                                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                0, 0, width, height, 0, 0, HINST, 0) ) {
+            printf( "Cannot open window\n" );
+            return 0;
+        }
+
+        return 1;
+    }
+
+    int TextureWindowEvents() {
+        static MSG msg;
+
+        PeekMessage( &msg, 0, 0, 0, PM_NOREMOVE );
+
+        if( msg.message == WM_KEYDOWN ) 
+            return 0;
+        else if( msg.message = WM_CLOSE )
+            return 0;
+        else {
+            DispatchMessage( &msg );
+            return 1;
+        }
+    }
+
+    void DestroyTextureWindow() {
+        HDC hdc = GetDC( gldl_win );
+
+        wglMakeCurrent( cl_win, cl_ctx );
+
+        if( hdc ) {
+            ReleaseDC( gldl_win, hdc );
+            hdc = 0;
+        }
+
+        DestroyWindow( gldl_win );
+        PostQuitMessage(0);
+        UnregisterClass( L"gl32wc", HINST );
+    }
+    
 
 // UNIX
 #else
