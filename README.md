@@ -9,7 +9,7 @@ Like gl3w do it, GLDL will download the gl3.h header from the Khronos OpenGL web
 This is my work project of my *Analyse et Comprehension de Programmes* class at the _Universite de Montreal_ for this session.
   
 
-This library will work only on **Linux** for now.
+This library works on **Linux** and **Windows**.
 
 
 Features
